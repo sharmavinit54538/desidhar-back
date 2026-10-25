@@ -51,3 +51,4 @@ async def remove(coupon_id: uuid.UUID, db: AsyncSession = Depends(get_db), _: Us
     if not c:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Coupon not found")
     await delete_coupon(db, c)
+

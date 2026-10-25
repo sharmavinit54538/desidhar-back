@@ -70,3 +70,4 @@ async def get_refunds(order_id: uuid.UUID, db: AsyncSession = Depends(get_db), _
 async def cancel_expired(timeout_minutes: int = 30, db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)):
     count = await cancel_expired_unpaid_orders(db, timeout_minutes)
     return {"cancelled_count": count}
+

@@ -19,3 +19,4 @@ def can_transition(current: str, target: str, is_admin: bool = False) -> tuple[b
         if current not in (OrderStatus.placed.value, OrderStatus.confirmed.value):
             return False, f"Customer may cancel only while placed or confirmed (current: {current})"
     return True, None
+

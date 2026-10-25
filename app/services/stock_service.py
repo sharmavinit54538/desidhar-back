@@ -20,3 +20,4 @@ async def release_stock(session: AsyncSession, items: list[tuple[uuid.UUID, int]
     for prod_id, qty in items:
         await session.execute(text("UPDATE products SET stock_qty = stock_qty + :q WHERE id = :id"), {"id": prod_id, "q": qty})
     await session.flush()
+

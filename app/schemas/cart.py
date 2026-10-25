@@ -30,3 +30,4 @@ class CartOut(BaseModel):
     items: list[CartItemOut]
     subtotal_paise: int
     item_count: int
+

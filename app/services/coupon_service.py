@@ -67,3 +67,4 @@ async def delete_coupon(session: AsyncSession, coupon: Coupon) -> None:
     else:
         await session.delete(coupon)
     await session.flush()
+

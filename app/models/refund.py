@@ -34,3 +34,4 @@ class Refund(Base):
         CheckConstraint("amount_paise > 0", name="ck_refunds_amount_positive"),
         Index("ix_refunds_order_issued", "order_id", "issued_at"),
     )
+

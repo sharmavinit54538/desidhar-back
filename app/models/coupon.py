@@ -36,3 +36,4 @@ class Coupon(Base):
         CheckConstraint("max_discount_paise IS NULL OR max_discount_paise >= 0", name="ck_coupons_max_discount_non_negative"),
         CheckConstraint("ends_at >= starts_at", name="ck_coupons_valid_date_range"),
     )
+

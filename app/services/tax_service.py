@@ -7,3 +7,4 @@ def compute_tax_paise(line_after_discount_paise: int, gst_rate_percent: Decimal 
         return 0
     tax = (Decimal(line_after_discount_paise) * rate) / (Decimal(100) + rate)
     return int(round(tax))
+

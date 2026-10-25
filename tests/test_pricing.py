@@ -22,3 +22,4 @@ def test_tax_computation():
     assert compute_tax_paise(10500, Decimal("5.00")) == 500
     assert compute_tax_paise(11800, Decimal("18.00")) == 1800
     assert compute_tax_paise(10000, Decimal("0.00")) == 0
+

@@ -32,3 +32,4 @@ class OrderItem(Base):
         Index("ix_order_items_order_id", "order_id"),
         Index("ix_order_items_product_id", "product_id"),
     )
+

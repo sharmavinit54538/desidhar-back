@@ -62,3 +62,4 @@ async def clear_cart(session: AsyncSession, user_id: uuid.UUID) -> None:
     cart = await get_or_create_cart(session, user_id)
     await session.execute(delete(CartItem).where(CartItem.cart_id == cart.id))
     await session.flush()
+

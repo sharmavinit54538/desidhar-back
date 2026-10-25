@@ -19,3 +19,4 @@ class CartItem(Base):
         CheckConstraint("quantity > 0", name="ck_cart_items_quantity_positive"),
         UniqueConstraint("cart_id", "product_id", name="uq_cart_items_cart_product"),
     )
+

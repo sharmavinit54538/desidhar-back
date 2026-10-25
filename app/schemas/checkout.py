@@ -35,3 +35,4 @@ class CheckoutPreviewOut(BaseModel):
     cod_available: bool
     can_checkout: bool
     blocking_reasons: list[str] = Field(default_factory=list)
+

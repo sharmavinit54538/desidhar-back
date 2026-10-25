@@ -79,3 +79,4 @@ class Order(Base):
         Index("ix_orders_user_placed", "user_id", "placed_at"),
         Index("ix_orders_status_placed", "status", "placed_at"),
     )
+

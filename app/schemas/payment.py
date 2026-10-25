@@ -14,3 +14,4 @@ class PaymentVerifyIn(BaseModel):
     provider_order_id: str
     provider_payment_id: str
     signature: str
+

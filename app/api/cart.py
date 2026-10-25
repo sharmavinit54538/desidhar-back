@@ -27,3 +27,4 @@ async def set_item_qty(
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
 async def empty_cart(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     await clear_cart(db, user.id)
+

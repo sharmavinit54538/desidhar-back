@@ -20,3 +20,4 @@ class OrderStatusHistory(Base):
     __table_args__ = (
         Index("ix_order_status_history_order_id", "order_id"),
     )
+

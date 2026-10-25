@@ -19,3 +19,4 @@ def allocate_discount(items: list[tuple[K, int]], total_discount_paise: int) -> 
     for i in range(shortfall):
         allocated[remainders[i][2]] += 1
     return allocated
+

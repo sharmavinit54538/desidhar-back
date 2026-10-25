@@ -30,3 +30,4 @@ class Address(Base):
         Index("ix_addresses_user_active", "user_id", postgresql_where=(deleted_at.is_(None))),
         Index("ix_addresses_user_default", "user_id", unique=True, postgresql_where=(and_(is_default.is_(True), deleted_at.is_(None)))),
     )
+

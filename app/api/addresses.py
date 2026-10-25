@@ -46,3 +46,4 @@ async def make_default(address_id: uuid.UUID, db: AsyncSession = Depends(get_db)
     if not addr:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Address not found")
     return await set_default_address(db, addr)
+

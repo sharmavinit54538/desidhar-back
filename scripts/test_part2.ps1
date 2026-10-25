@@ -1,5 +1,8 @@
 # scripts/test_part2.ps1 - Complete verification of Part 2 with curl.exe
 
+$run_id = [guid]::NewGuid().ToString().Substring(0, 8)
+Write-Host "Test Run ID: $run_id"
+
 $tokens = $(python -c "
 import asyncio
 from app.core.db import async_session_maker
@@ -23,8 +26,6 @@ $admin_token = $tokens[0]
 $c1_token = $tokens[1]
 $c2_token = $tokens[2]
 
-# Ensure C1 has an address at 500001
-$addr_res = curl.exe -s -X POST -H "Authorization: Bearer $c1_token" -H "Content-Type: application/json" -d "{\`"full_name\`": \`"Vinit Sharma\`", \`"phone\`": \`"9876543210\`", \`"line1\`": \`"123 Street\`", \`"city\`": \`"Hyderabad\`", \`"state\`": \`"Telangana\`", \`"pincode\`": \`"500001\`", \`"is_default\`": true}" "http://127.0.0.1:8000/addresses"
 $c1_addr_id = $(python -c "
 import asyncio
 from app.core.db import async_session_maker
@@ -35,12 +36,11 @@ from sqlalchemy import select
 async def main():
     async with async_session_maker() as session:
         c1 = (await session.execute(select(User).where(User.role == Role.customer))).scalars().first()
-        a = (await session.execute(select(Address).where(Address.user_id == c1.id, Address.deleted_at.is_(None)))).scalars().first()
+        a = (await session.execute(select(Address).where(Address.user_id == c1.id, Address.pincode == '500001', Address.deleted_at.is_(None)))).scalars().first()
         print(str(a.id))
 
 asyncio.run(main())
 ").Trim()
-$addr_id = $c1_addr_id
 
 $product_milk = $(python -c "
 import asyncio
@@ -76,7 +76,7 @@ curl.exe -s -X DELETE -H "Authorization: Bearer $c1_token" "http://127.0.0.1:800
 curl.exe -s -X PUT -H "Authorization: Bearer $c1_token" -H "Content-Type: application/json" -d "{\`"quantity\`": 2}" "http://127.0.0.1:8000/cart/items/$product_milk" | Out-Null
 curl.exe -s -X PUT -H "Authorization: Bearer $c1_token" -H "Content-Type: application/json" -d "{\`"quantity\`": 1}" "http://127.0.0.1:8000/cart/items/$product_ghee" | Out-Null
 
-$order1_json = curl.exe -s -X POST -H "Authorization: Bearer $c1_token" -H "Idempotency-Key: order-cod-key-001" -H "Content-Type: application/json" -d "{\`"address_id\`": \`"$addr_id\`", \`"payment_method\`": \`"cod\`", \`"coupon_code\`": \`"WELCOME10\`"}" "http://127.0.0.1:8000/orders"
+$order1_json = curl.exe -s -X POST -H "Authorization: Bearer $c1_token" -H "Idempotency-Key: order-cod-$run_id" -H "Content-Type: application/json" -d "{\`"address_id\`": \`"$c1_addr_id\`", \`"payment_method\`": \`"cod\`", \`"coupon_code\`": \`"FLAT50\`"}" "http://127.0.0.1:8000/orders"
 Write-Host "Order Placed Response:"
 Write-Host $order1_json
 $order1 = $order1_json | ConvertFrom-Json
@@ -92,13 +92,12 @@ Write-Host "Sum of item line totals:" $items_sum
 Write-Host "Sum of items + Delivery Fee:" ($items_sum + $order1.delivery_fee_paise)
 
 Write-Host "`n================ 2. IDEMPOTENCY KEY CHECK ================"
-Write-Host "Posting again with same Idempotency-Key (order-cod-key-001):"
-$idem_json = curl.exe -s -X POST -H "Authorization: Bearer $c1_token" -H "Idempotency-Key: order-cod-key-001" -H "Content-Type: application/json" -d "{\`"address_id\`": \`"$addr_id\`", \`"payment_method\`": \`"cod\`"}" "http://127.0.0.1:8000/orders"
+Write-Host "Posting again with same Idempotency-Key (order-cod-$run_id):"
+$idem_json = curl.exe -s -X POST -H "Authorization: Bearer $c1_token" -H "Idempotency-Key: order-cod-$run_id" -H "Content-Type: application/json" -d "{\`"address_id\`": \`"$c1_addr_id\`", \`"payment_method\`": \`"cod\`"}" "http://127.0.0.1:8000/orders"
 $idem_order = $idem_json | ConvertFrom-Json
 Write-Host "Same Order Number returned:" ($idem_order.order_number -eq $order1.order_number)
 
 Write-Host "`n================ 3. CUSTOMER CANCELLATION & STOCK RESTORATION ================"
-# Check stock of milk before cancel
 $stock_before = $(python -c "
 import asyncio
 from app.core.db import async_session_maker
@@ -172,12 +171,14 @@ curl.exe -s -X POST -H "Authorization: Bearer $c2_token" -H "Content-Type: appli
 $c2_addr_id = $(python -c "
 import asyncio
 from app.core.db import async_session_maker
+from app.models.user import User, Role
 from app.models.address import Address
 from sqlalchemy import select
 
 async def main():
     async with async_session_maker() as session:
-        a = (await session.execute(select(Address).where(Address.full_name == 'Customer Two', Address.deleted_at.is_(None)))).scalars().first()
+        c2 = (await session.execute(select(User).where(User.email == 'customer2@example.com'))).scalars().first()
+        a = (await session.execute(select(Address).where(Address.user_id == c2.id, Address.deleted_at.is_(None)))).scalars().first()
         print(str(a.id))
 
 asyncio.run(main())
@@ -187,12 +188,12 @@ curl.exe -s -X DELETE -H "Authorization: Bearer $c2_token" "http://127.0.0.1:800
 curl.exe -s -X PUT -H "Authorization: Bearer $c2_token" -H "Content-Type: application/json" -d "{\`"quantity\`": 1}" "http://127.0.0.1:8000/cart/items/$kaju_id" | Out-Null
 
 # Order 1 placed by C1
-$c1_kaju = curl.exe -s -w "`nHTTP_STATUS: %{http_code}`n" -X POST -H "Authorization: Bearer $c1_token" -H "Idempotency-Key: c1-kaju-001" -H "Content-Type: application/json" -d "{\`"address_id\`": \`"$addr_id\`", \`"payment_method\`": \`"cod\`"}" "http://127.0.0.1:8000/orders"
+$c1_kaju = curl.exe -s -w "`nHTTP_STATUS: %{http_code}`n" -X POST -H "Authorization: Bearer $c1_token" -H "Idempotency-Key: c1-kaju-$run_id" -H "Content-Type: application/json" -d "{\`"address_id\`": \`"$c1_addr_id\`", \`"payment_method\`": \`"cod\`"}" "http://127.0.0.1:8000/orders"
 Write-Host "Customer 1 result (Success expected):"
 Write-Host $c1_kaju
 
 # Order 2 placed by C2 (now stock is 0 -> should fail with 422)
-$c2_kaju = curl.exe -s -w "`nHTTP_STATUS: %{http_code}`n" -X POST -H "Authorization: Bearer $c2_token" -H "Idempotency-Key: c2-kaju-002" -H "Content-Type: application/json" -d "{\`"address_id\`": \`"$c2_addr_id\`", \`"payment_method\`": \`"cod\`"}" "http://127.0.0.1:8000/orders"
+$c2_kaju = curl.exe -s -w "`nHTTP_STATUS: %{http_code}`n" -X POST -H "Authorization: Bearer $c2_token" -H "Idempotency-Key: c2-kaju-$run_id" -H "Content-Type: application/json" -d "{\`"address_id\`": \`"$c2_addr_id\`", \`"payment_method\`": \`"cod\`"}" "http://127.0.0.1:8000/orders"
 Write-Host "Customer 2 result (Failure expected):"
 Write-Host $c2_kaju
 
@@ -235,7 +236,7 @@ Write-Host "`n================ 8. ONLINE ORDER & IDEMPOTENT WEBHOOK ============
 curl.exe -s -X DELETE -H "Authorization: Bearer $c1_token" "http://127.0.0.1:8000/cart" | Out-Null
 curl.exe -s -X PUT -H "Authorization: Bearer $c1_token" -H "Content-Type: application/json" -d "{\`"quantity\`": 1}" "http://127.0.0.1:8000/cart/items/$product_milk" | Out-Null
 
-$online_order = curl.exe -s -X POST -H "Authorization: Bearer $c1_token" -H "Idempotency-Key: online-order-001" -H "Content-Type: application/json" -d "{\`"address_id\`": \`"$addr_id\`", \`"payment_method\`": \`"online\`"}" "http://127.0.0.1:8000/orders" | ConvertFrom-Json
+$online_order = curl.exe -s -X POST -H "Authorization: Bearer $c1_token" -H "Idempotency-Key: online-ord-$run_id" -H "Content-Type: application/json" -d "{\`"address_id\`": \`"$c1_addr_id\`", \`"payment_method\`": \`"online\`"}" "http://127.0.0.1:8000/orders" | ConvertFrom-Json
 Write-Host "Online Order Placed. Status (Expect payment_pending):" $online_order.status
 
 # Initiate payment

@@ -49,3 +49,4 @@ async def set_default_address(session: AsyncSession, addr: Address) -> Address:
     addr.is_default = True
     await session.flush()
     return addr
+

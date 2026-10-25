@@ -13,3 +13,4 @@ class PaymentProvider(ABC):
     @abstractmethod
     async def parse_webhook(self, payload: dict, signature: str) -> tuple[bool, str, str, int]:
         pass
+

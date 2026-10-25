@@ -26,3 +26,4 @@ class Payment(Base):
     __table_args__ = (
         Index("ix_payments_order_id", "order_id"),
     )
+

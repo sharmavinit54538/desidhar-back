@@ -34,3 +34,4 @@ async def create_refund(
 
 async def list_order_refunds(session: AsyncSession, order_id: uuid.UUID) -> list[Refund]:
     return list((await session.execute(select(Refund).where(Refund.order_id == order_id).order_by(Refund.issued_at.desc()))).scalars().all())
+

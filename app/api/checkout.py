@@ -17,3 +17,4 @@ async def preview(data: CheckoutPreviewIn, db: AsyncSession = Depends(get_db), u
         total_paise=res.total_paise, total_tax_paise=res.total_tax_paise, cod_available=res.cod_available,
         can_checkout=res.can_checkout, blocking_reasons=res.blocking_reasons,
     )
+

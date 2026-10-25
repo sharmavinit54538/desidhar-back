@@ -124,3 +124,4 @@ curl.exe -s -w "`nHTTP_STATUS: %{http_code}`n" -H "Authorization: Bearer $c1_tok
 Write-Host "Admin accessing /admin/coupons (Expect 200):"
 curl.exe -s -H "Authorization: Bearer $admin_token" "http://127.0.0.1:8000/admin/coupons"
 Write-Host "`n"
+

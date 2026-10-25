@@ -27,6 +27,9 @@ class ProductCreate(BaseModel):
     unit: str
     pack_size: Decimal = Field(..., gt=0)
     stock_qty: int = Field(default=0, ge=0)
+    cost_price_paise: int = Field(default=0, ge=0)
+    gst_rate_percent: Decimal = Field(default=Decimal("0.00"), ge=0, le=100)
+    max_qty_per_order: int = Field(default=10, gt=0)
     shelf_life_days: int | None = Field(default=None, ge=1)
     is_veg: bool = True
     is_active: bool = True
@@ -53,6 +56,9 @@ class ProductUpdate(BaseModel):
     unit: str | None = None
     pack_size: Decimal | None = Field(default=None, gt=0)
     stock_qty: int | None = Field(default=None, ge=0)
+    cost_price_paise: int | None = Field(default=None, ge=0)
+    gst_rate_percent: Decimal | None = Field(default=None, ge=0, le=100)
+    max_qty_per_order: int | None = Field(default=None, gt=0)
     shelf_life_days: int | None = Field(default=None, ge=1)
     is_veg: bool | None = None
     is_active: bool | None = None
@@ -80,6 +86,9 @@ class ProductOut(BaseModel):
     description: str | None
     price_paise: int
     mrp_paise: int
+    cost_price_paise: int = 0
+    gst_rate_percent: Decimal = Decimal("0.00")
+    max_qty_per_order: int = 10
     unit: str
     pack_size: Decimal
     stock_qty: int
@@ -89,8 +98,15 @@ class ProductOut(BaseModel):
     images: list[ImageOut]
     created_at: datetime
     updated_at: datetime
+    warning: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def check_cost_warning(self) -> Self:
+        if self.price_paise < self.cost_price_paise:
+            self.warning = "Selling price is below cost price"
+        return self
 
 
 class ProductListOut(BaseModel):

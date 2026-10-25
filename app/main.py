@@ -5,6 +5,7 @@ from app.core.config import get_settings
 from app.api import (
     auth, admin, me, categories, products, admin_categories, admin_products,
     delivery, admin_pincodes, admin_pincodes_bulk, admin_product_delivery,
+    addresses, cart, checkout, admin_coupons,
 )
 
 settings = get_settings()
@@ -36,6 +37,10 @@ app.include_router(delivery.router)
 app.include_router(admin_pincodes_bulk.router)
 app.include_router(admin_pincodes.router)
 app.include_router(admin_product_delivery.router)
+app.include_router(addresses.router)
+app.include_router(cart.router)
+app.include_router(checkout.router)
+app.include_router(admin_coupons.router)
 
 
 @app.get("/health")

@@ -98,4 +98,5 @@ class ProductListOut(BaseModel):
     total: int
     page: int
     page_size: int
+    pincode_serviceable: bool | None = None
 

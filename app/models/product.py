@@ -9,6 +9,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.db import Base
+from app.models.delivery_mode import DeliveryMode
 
 
 class UnitEnum(str, enum.Enum):
@@ -35,6 +36,7 @@ class Product(Base):
     stock_qty: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     shelf_life_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_veg: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    delivery_mode: Mapped[DeliveryMode] = mapped_column(Enum(DeliveryMode, native_enum=False), default=DeliveryMode.all, server_default="all", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)

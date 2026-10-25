@@ -5,6 +5,7 @@ from app.models.product import Product
 from app.models.product_image import ProductImage
 from app.models.category import Category
 from app.services.slug_service import generate_unique_slug
+from app.services.delivery_service import check_deliverable
 
 
 async def create_product(session: AsyncSession, data: dict) -> Product:
@@ -62,13 +63,24 @@ async def list_products(
     page: int = 1,
     page_size: int = 20,
     active_only: bool = True,
-) -> tuple[list[Product], int]:
+    pincode: str | None = None,
+) -> tuple[list[Product], int, bool | None]:
     stmt = select(Product)
     count_stmt = select(func.count()).select_from(Product)
 
     if active_only:
         stmt = stmt.where(Product.is_active.is_(True))
         count_stmt = count_stmt.where(Product.is_active.is_(True))
+
+    pincode_serviceable: bool | None = None
+    if pincode is not None:
+        chk = await check_deliverable(session, pincode=pincode, product_ids=None)
+        pincode_serviceable = chk.pincode_serviceable
+        if not chk.pincode_serviceable:
+            return [], 0, False
+        deliv_ids = [pid for pid, (is_deliv, _) in chk.results.items() if is_deliv]
+        stmt = stmt.where(Product.id.in_(deliv_ids))
+        count_stmt = count_stmt.where(Product.id.in_(deliv_ids))
 
     if q:
         pattern = f"%{q}%"
@@ -104,8 +116,8 @@ async def list_products(
     }
     stmt = stmt.order_by(order_map.get(sort, Product.created_at.desc()))
 
-    total = (await session.execute(count_stmt)).scalar()
+    total = (await session.execute(count_stmt)).scalar() or 0
     stmt = stmt.offset((page - 1) * page_size).limit(page_size)
     result = await session.execute(stmt)
-    return list(result.scalars().all()), total
+    return list(result.scalars().all()), total, pincode_serviceable
 

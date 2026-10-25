@@ -30,3 +30,4 @@ class Pincode(Base):
         CheckConstraint("free_delivery_above_paise IS NULL OR free_delivery_above_paise >= 0", name="ck_pincodes_free_delivery_ge_zero"),
         CheckConstraint("eta_hours IS NULL OR eta_hours >= 0", name="ck_pincodes_eta_hours_ge_zero"),
     )
+

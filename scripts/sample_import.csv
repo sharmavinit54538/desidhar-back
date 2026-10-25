@@ -1,0 +1,5 @@
+pincode,area_name,city,state,is_serviceable,delivery_fee_paise,min_order_paise,cod_available
+500001,Abids Central,Hyderabad,Telangana,true,4000,15000,true
+600001,George Town,Chennai,Tamil Nadu,true,5000,20000,false
+99999,Invalid Pin,Bad City,Bad State,true,1000,5000,true
+

@@ -36,7 +36,7 @@ async def list_all(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    items, total = await list_products(
+    items, total, _ = await list_products(
         db, q=q, category_slug=category, min_price=min_price, max_price=max_price,
         in_stock=in_stock, sort=sort, page=page, page_size=page_size, active_only=False,
     )

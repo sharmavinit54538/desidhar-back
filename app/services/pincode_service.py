@@ -64,3 +64,4 @@ async def update_pincode(session: AsyncSession, pincode: Pincode, data: dict) ->
 async def delete_pincode(session: AsyncSession, pincode: Pincode) -> None:
     await session.delete(pincode)
     await session.flush()
+

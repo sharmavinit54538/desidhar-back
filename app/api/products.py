@@ -17,13 +17,15 @@ async def get_products(
     sort: str = Query(default="newest", pattern="^(newest|price_asc|price_desc|name)$"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=50),
+    pincode: str | None = Query(default=None, pattern=r"^[1-9][0-9]{5}$"),
     db: AsyncSession = Depends(get_db),
 ):
-    items, total = await list_products(
+    items, total, pincode_serviceable = await list_products(
         db, q=q, category_slug=category, min_price=min_price, max_price=max_price,
         in_stock=in_stock, sort=sort, page=page, page_size=page_size, active_only=True,
+        pincode=pincode,
     )
-    return ProductListOut(items=items, total=total, page=page, page_size=page_size)
+    return ProductListOut(items=items, total=total, page=page, page_size=page_size, pincode_serviceable=pincode_serviceable)
 
 
 @router.get("/{slug}", response_model=ProductOut)

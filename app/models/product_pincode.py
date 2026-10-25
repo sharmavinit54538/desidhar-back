@@ -14,3 +14,4 @@ class ProductPincode(Base):
     __table_args__ = (
         Index("ix_product_pincodes_pincode_id", "pincode_id"),
     )
+

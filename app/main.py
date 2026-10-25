@@ -2,7 +2,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
-from app.api import auth, admin, me, categories, products, admin_categories, admin_products
+from app.api import (
+    auth, admin, me, categories, products, admin_categories, admin_products,
+    delivery, admin_pincodes, admin_pincodes_bulk, admin_product_delivery,
+)
 
 settings = get_settings()
 
@@ -29,6 +32,10 @@ app.include_router(categories.router)
 app.include_router(products.router)
 app.include_router(admin_categories.router)
 app.include_router(admin_products.router)
+app.include_router(delivery.router)
+app.include_router(admin_pincodes_bulk.router)
+app.include_router(admin_pincodes.router)
+app.include_router(admin_product_delivery.router)
 
 
 @app.get("/health")

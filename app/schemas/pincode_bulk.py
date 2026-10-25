@@ -12,3 +12,4 @@ class BulkUpsertResult(BaseModel):
     updated: int
     invalid: int
     errors: list[BulkRowError] = Field(default_factory=list)
+

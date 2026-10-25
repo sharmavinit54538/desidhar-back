@@ -32,3 +32,4 @@ class ProductDeliveryConfigOut(BaseModel):
     product_id: uuid.UUID
     delivery_mode: str
     pincodes: list[str]
+

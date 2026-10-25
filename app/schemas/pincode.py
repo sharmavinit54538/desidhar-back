@@ -70,3 +70,4 @@ class PincodeListOut(BaseModel):
     total: int
     page: int
     page_size: int
+

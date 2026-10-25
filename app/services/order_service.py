@@ -112,7 +112,7 @@ async def transition_order_status(
         order.cancel_reason = note or "Cancelled"
         await release_stock(session, [(it.product_id, it.quantity) for it in order.items])
 
-    order.history.append(OrderStatusHistory(order_id=order.id, from_status=prev, to_status=target, changed_by=changed_by, note=note))
+    session.add(OrderStatusHistory(order_id=order.id, from_status=prev, to_status=target, changed_by=changed_by, note=note))
     await session.flush()
     return True, None
 

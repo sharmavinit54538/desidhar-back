@@ -21,6 +21,8 @@ async def initiate_payment(session: AsyncSession, order: Order) -> dict:
 
 
 async def confirm_payment_success(session: AsyncSession, p_order_id: str, p_pay_id: str) -> Order | None:
+    if not p_order_id:
+        return None
     pm = (await session.execute(select(Payment).where(Payment.provider_order_id == p_order_id))).scalars().first()
     if not pm:
         return None
@@ -34,7 +36,7 @@ async def confirm_payment_success(session: AsyncSession, p_order_id: str, p_pay_
     if order.status == OrderStatus.payment_pending:
         order.status = OrderStatus.placed
         order.placed_at = datetime.now(timezone.utc)
-        order.history.append(OrderStatusHistory(order_id=order.id, from_status=OrderStatus.payment_pending.value, to_status=OrderStatus.placed.value, note="Payment successful"))
+        session.add(OrderStatusHistory(order_id=order.id, from_status=OrderStatus.payment_pending.value, to_status=OrderStatus.placed.value, note="Payment successful"))
     await session.flush()
     return order
 
@@ -63,7 +65,7 @@ async def cancel_expired_unpaid_orders(session: AsyncSession, timeout_minutes: i
         o.status = OrderStatus.cancelled
         o.cancelled_at = datetime.now(timezone.utc)
         o.cancel_reason = "Payment timeout"
-        o.history.append(OrderStatusHistory(order_id=o.id, from_status=OrderStatus.payment_pending.value, to_status=OrderStatus.cancelled.value, note="Cancelled due to payment timeout"))
+        session.add(OrderStatusHistory(order_id=o.id, from_status=OrderStatus.payment_pending.value, to_status=OrderStatus.cancelled.value, note="Cancelled due to payment timeout"))
         await release_stock(session, [(it.product_id, it.quantity) for it in o.items])
         count += 1
     await session.flush()

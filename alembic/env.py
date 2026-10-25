@@ -1,4 +1,4 @@
-from logging.config import fileConfig
+﻿from logging.config import fileConfig
 from sqlalchemy import pool, create_engine
 from alembic import context
 import os
@@ -8,11 +8,12 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from app.core.config import settings
 from app.core.db import Base
+import app.models  # noqa: F401
 from app.models.user import User
 from app.models.otp import OTPCode
 
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("+asyncpg", "+psycopg2").replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

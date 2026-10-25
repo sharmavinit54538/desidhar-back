@@ -1,0 +1,39 @@
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+
+# Virtual Environments
+env/
+.venv/
+venv/
+
+# Python bytecode and build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+
+# Testing & Linting caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDEs & OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# Logs and local data
+*.log
+*.sqlite3
+uploads/
+
+# Ensure Alembic migration versions are tracked
+!alembic/versions/

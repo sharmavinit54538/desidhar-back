@@ -27,6 +27,8 @@ class EvaluatedCheckout:
     total_paise: int
     total_tax_paise: int
     cod_available: bool
+    free_delivery_above_paise: int = 0
+    min_order_paise: int = 0
 
 
 async def evaluate_checkout(

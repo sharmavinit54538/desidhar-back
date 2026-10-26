@@ -63,3 +63,114 @@ async def clear_cart(session: AsyncSession, user_id: uuid.UUID) -> None:
     await session.execute(delete(CartItem).where(CartItem.cart_id == cart.id))
     await session.flush()
 
+
+async def validate_cart_items(
+    session: AsyncSession,
+    items: list,
+) -> dict:
+    validated_items: list[dict] = []
+    top_issues: list[str] = []
+
+    for item in items:
+        item_issues: list[str] = []
+        prod_id_str = str(getattr(item, "product_id", "") or "")
+        var_id_val = getattr(item, "variant_id", None)
+        var_id_str = str(var_id_val) if var_id_val is not None else None
+        qty = int(getattr(item, "quantity", 1))
+
+        try:
+            prod_uuid = uuid.UUID(prod_id_str)
+        except (ValueError, TypeError, AttributeError):
+            prod_uuid = None
+
+        if prod_uuid is None:
+            issue_msg = "Invalid product ID format"
+            validated_items.append({
+                "product_id": prod_id_str,
+                "variant_id": var_id_str,
+                "quantity": qty,
+                "price": 0.0,
+                "unit_price": 0.0,
+                "line_total": 0.0,
+                "available_stock": 0,
+                "is_valid": False,
+                "available": False,
+                "issues": [issue_msg],
+                "message": issue_msg,
+                "name": None,
+                "variant_label": None,
+            })
+            top_issues.append(f"Product {prod_id_str or 'unknown'}: {issue_msg}")
+            continue
+
+        product = (await session.execute(select(Product).where(Product.id == prod_uuid))).scalar_one_or_none()
+
+        if not product:
+            issue_msg = "Product does not exist"
+            validated_items.append({
+                "product_id": prod_id_str,
+                "variant_id": var_id_str,
+                "quantity": qty,
+                "price": 0.0,
+                "unit_price": 0.0,
+                "line_total": 0.0,
+                "available_stock": 0,
+                "is_valid": False,
+                "available": False,
+                "issues": [issue_msg],
+                "message": issue_msg,
+                "name": None,
+                "variant_label": None,
+            })
+            top_issues.append(f"Product {prod_id_str}: {issue_msg}")
+            continue
+
+        if not product.is_active:
+            item_issues.append("Product is currently unavailable")
+
+        if product.stock_qty <= 0:
+            item_issues.append("Product is out of stock")
+        elif qty > product.stock_qty:
+            item_issues.append(f"Only {product.stock_qty} units available in stock")
+
+        if product.max_qty_per_order and qty > product.max_qty_per_order:
+            item_issues.append(f"Maximum {product.max_qty_per_order} units allowed per order")
+
+        if qty <= 0:
+            item_issues.append("Quantity must be greater than 0")
+
+        unit_str = product.unit.value if hasattr(product.unit, "value") else str(product.unit)
+        pack_label = f"{product.pack_size} {unit_str}".strip()
+        price_rupees = round(product.price_paise / 100.0, 2)
+        is_valid = len(item_issues) == 0
+        line_total = round(price_rupees * qty, 2) if is_valid else 0.0
+
+        for iss in item_issues:
+            top_issues.append(f"{product.name}: {iss}")
+
+        validated_items.append({
+            "product_id": str(product.id),
+            "variant_id": var_id_str,
+            "quantity": qty,
+            "price": price_rupees,
+            "unit_price": price_rupees,
+            "line_total": line_total,
+            "available_stock": product.stock_qty,
+            "is_valid": is_valid,
+            "available": is_valid,
+            "issues": item_issues,
+            "message": item_issues[0] if item_issues else None,
+            "name": product.name,
+            "variant_label": pack_label,
+        })
+
+    all_valid = all(i["is_valid"] for i in validated_items) if validated_items else True
+    subtotal = round(sum(i["line_total"] for i in validated_items if i["is_valid"]), 2)
+
+    return {
+        "valid": all_valid,
+        "items": validated_items,
+        "issues": top_issues,
+        "subtotal": subtotal,
+    }
+

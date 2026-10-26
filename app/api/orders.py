@@ -8,22 +8,33 @@ from app.services.order_service import (
     place_order, get_user_order, list_user_orders, transition_order_status,
 )
 
+from sqlalchemy import delete
+from app.models.cart_item import CartItem
+from app.services.cart_service import get_or_create_cart
+
 router = APIRouter(prefix="/orders", tags=["orders"])
 
 
 @router.post("", response_model=OrderOut, status_code=status.HTTP_201_CREATED)
 async def create_order(
     data: OrderCreateIn,
-    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    if not idempotency_key.strip():
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Idempotency-Key header is required")
-    order, err = await place_order(db, user, data.address_id, data.payment_method, idempotency_key.strip(), data.coupon_code, data.notes)
+    key = (idempotency_key or str(uuid.uuid4())).strip()
+    if data.items:
+        cart = await get_or_create_cart(db, user.id)
+        await db.execute(delete(CartItem).where(CartItem.cart_id == cart.id))
+        for it in data.items:
+            db.add(CartItem(cart_id=cart.id, product_id=it.product_id, quantity=it.quantity))
+        await db.flush()
+
+    order, err = await place_order(db, user, data.address_id, data.payment_method, key, data.coupon_code, data.notes)
     if err or not order:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=err or "Could not place order")
     return order
+
 
 
 @router.get("", response_model=OrderListOut)

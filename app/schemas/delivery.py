@@ -7,12 +7,17 @@ class DeliveryCheckOut(BaseModel):
     serviceable: bool
     city: str | None = None
     state: str | None = None
+    delivery_charge: float = 0.0
+    free_delivery_above: float = 0.0
+    min_order: float = 0.0
+    estimated_delivery: str | None = None
+    cod_available: bool = False
+    message: str | None = None
+    # Paise fields for backward compatibility
     delivery_fee_paise: int | None = None
     free_delivery_above_paise: int | None = None
     min_order_paise: int | None = None
-    cod_available: bool | None = None
     eta_hours: int | None = None
-    message: str | None = None
 
 
 class ProductDeliveryCheckOut(BaseModel):

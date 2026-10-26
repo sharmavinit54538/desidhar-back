@@ -16,6 +16,7 @@ from app.models.order_item import OrderItem
 from app.models.order_status_history import OrderStatusHistory
 from app.models.payment import Payment
 from app.models.refund import Refund, RefundReason
+from app.models.payment_method import PaymentMethodRecord
 
 __all__ = [
     "User", "Role", "OTPCode", "Category", "Product", "UnitEnum",
@@ -23,4 +24,6 @@ __all__ = [
     "Address", "Cart", "CartItem", "Coupon", "CouponType", "CouponRedemption",
     "Order", "OrderStatus", "PaymentMethod", "PaymentStatus",
     "OrderItem", "OrderStatusHistory", "Payment", "Refund", "RefundReason",
+    "PaymentMethodRecord",
 ]
+

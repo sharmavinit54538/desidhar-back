@@ -10,7 +10,7 @@ settings = get_settings()
 
 async def send_otp_email(email: str, otp: str) -> None:
     if settings.APP_ENV == "dev" and not settings.smtp_configured:
-        print(f"[DEV] OTP for {email}: {otp}")
+        logger.info("OTP generated for %s (dev mode, email dispatch simulated)", email)
         return
 
     if not settings.smtp_configured:

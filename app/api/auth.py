@@ -1,14 +1,21 @@
+import logging
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.api.deps import get_db
+from app.api.deps import get_db, get_current_user
 from app.services.otp_service import create_otp, verify_otp
 from app.services.email_service import send_otp_email
-from app.services.auth_service import get_or_create_customer
-from app.core.tokens import create_customer_token
-from app.schemas.auth import OTPRequest, OTPVerify, TokenResponse
+from app.services.auth_service import get_or_create_customer, get_user_by_id
+from app.core.tokens import create_customer_token, create_refresh_token, decode_refresh_token
+from app.schemas.auth import OTPRequest, OTPVerify, TokenResponse, RefreshTokenRequest
 from app.core.rate_limit import limiter
+from app.core.config import get_settings
+from app.models.user import Role, User
+
+logger = logging.getLogger(__name__)
+settings = get_settings()
 
 router = APIRouter(prefix="/auth/otp", tags=["auth"])
+auth_router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/request", status_code=status.HTTP_202_ACCEPTED)
@@ -29,6 +36,17 @@ async def request_otp(
     return {"message": "If the email exists, an OTP has been sent"}
 
 
+@router.post("/resend", status_code=status.HTTP_202_ACCEPTED)
+@limiter.limit("5/minute")
+async def resend_otp(
+    request: Request,
+    data: OTPRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    return await request_otp(request=request, data=data, background_tasks=background_tasks, db=db)
+
+
 @router.post("/verify", response_model=TokenResponse)
 @limiter.limit("10/minute")
 async def verify_otp_endpoint(request: Request, data: OTPVerify, db: AsyncSession = Depends(get_db)):
@@ -36,6 +54,65 @@ async def verify_otp_endpoint(request: Request, data: OTPVerify, db: AsyncSessio
     if not valid:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired OTP")
 
-    user = await get_or_create_customer(db, data.email)
+    try:
+        user = await get_or_create_customer(db, data.email)
+    except Exception as e:
+        logger.error("Database error during customer creation: %s", type(e).__name__)
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to authenticate user due to database error",
+        )
+
+    if user.role != Role.customer:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin accounts must authenticate via admin login",
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is deactivated",
+        )
+
     token = create_customer_token(str(user.id))
-    return TokenResponse(access_token=token, expires_in=7 * 24 * 60 * 60)
+    refresh_token = create_refresh_token(str(user.id), "customer")
+    return TokenResponse(
+        access_token=token,
+        token_type="bearer",
+        expires_in=settings.CUSTOMER_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        refresh_token=refresh_token,
+    )
+
+
+@auth_router.post("/refresh", response_model=TokenResponse)
+@limiter.limit("10/minute")
+async def refresh_token_endpoint(
+    request: Request,
+    data: RefreshTokenRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        payload = decode_refresh_token(data.refresh_token)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
+
+    user_id = payload.get("sub")
+    user = await get_user_by_id(db, user_id)
+    if not user or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
+
+    new_access_token = create_customer_token(str(user.id))
+    new_refresh_token = create_refresh_token(str(user.id), user.role.value)
+    return TokenResponse(
+        access_token=new_access_token,
+        token_type="bearer",
+        expires_in=settings.CUSTOMER_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        refresh_token=new_refresh_token,
+    )
+
+
+@auth_router.post("/logout")
+async def logout_endpoint(request: Request):
+    return {"message": "Successfully logged out"}

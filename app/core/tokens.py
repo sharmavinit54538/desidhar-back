@@ -8,7 +8,7 @@ settings = get_settings()
 def create_access_token(sub: str, role: str, expires_delta: timedelta | None = None) -> str:
     now = datetime.now(timezone.utc)
     expire = now + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
-    payload = {"sub": sub, "role": role, "iat": int(now.timestamp()), "exp": int(expire.timestamp())}
+    payload = {"sub": sub, "role": role, "type": "access", "iat": int(now.timestamp()), "exp": int(expire.timestamp())}
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
@@ -20,9 +20,28 @@ def create_admin_token(sub: str) -> str:
     return create_access_token(sub, "admin", timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
 
 
+def create_refresh_token(sub: str, role: str, expires_delta: timedelta | None = None) -> str:
+    now = datetime.now(timezone.utc)
+    expire = now + (expires_delta or timedelta(days=30))
+    payload = {"sub": sub, "role": role, "type": "refresh", "iat": int(now.timestamp()), "exp": int(expire.timestamp())}
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
 def decode_token(token: str) -> dict:
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM], options={"require_exp": True, "require_sub": True})
+        if payload.get("type") == "refresh":
+            raise ValueError("Refresh token cannot be used as access token")
+        return payload
+    except JWTError:
+        raise ValueError("Invalid token")
+
+
+def decode_refresh_token(token: str) -> dict:
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM], options={"require_exp": True, "require_sub": True})
+        if payload.get("type") != "refresh":
+            raise ValueError("Not a refresh token")
         return payload
     except JWTError:
         raise ValueError("Invalid token")

@@ -19,7 +19,7 @@ def _hash_otp(otp: str) -> str:
 
 
 def _generate_otp() -> str:
-    return "".join(str(secrets.randbelow(10)) for _ in range(6))
+    return f"{secrets.randbelow(1_000_000):06d}"
 
 
 async def create_otp(session: AsyncSession, email: str) -> str:
@@ -53,10 +53,14 @@ async def verify_otp(session: AsyncSession, email: str, otp: str) -> bool:
         .where(OTPCode.email == email_lower, OTPCode.consumed_at.is_(None))
         .order_by(OTPCode.created_at.desc())
         .limit(1)
+        .with_for_update()
     )
     otp_code = result.scalar_one_or_none()
 
     if not otp_code:
+        return False
+
+    if otp_code.attempts >= MAX_ATTEMPTS:
         return False
 
     if utc_now() > otp_code.expires_at:
@@ -66,7 +70,9 @@ async def verify_otp(session: AsyncSession, email: str, otp: str) -> bool:
         otp_code.attempts += 1
         if otp_code.attempts >= MAX_ATTEMPTS:
             await session.delete(otp_code)
+        await session.commit()
         return False
 
     otp_code.consumed_at = utc_now()
+    await session.flush()
     return True

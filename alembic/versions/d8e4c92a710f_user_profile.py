@@ -16,6 +16,14 @@ depends_on = None
 def upgrade() -> None:
     op.add_column("users", sa.Column("full_name", sa.String(length=100), nullable=True))
     op.add_column("users", sa.Column("phone", sa.String(length=15), nullable=True))
+    # Safely backfill existing customer records from active default addresses
+    op.execute("""
+        UPDATE users u
+        SET full_name = COALESCE(u.full_name, a.full_name),
+            phone = COALESCE(u.phone, a.phone)
+        FROM addresses a
+        WHERE a.user_id = u.id AND a.is_default = true AND a.deleted_at IS NULL;
+    """)
 
 
 def downgrade() -> None:

@@ -10,3 +10,7 @@ alembic
 python-multipart
 email-validator
 pydantic-extra-types
+pytest
+pytest-asyncio
+httpx
+

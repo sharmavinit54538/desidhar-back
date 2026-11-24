@@ -1,4 +1,5 @@
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.passwords import hash_password, verify_password, dummy_hash
 from app.core.tokens import create_customer_token, create_admin_token
@@ -11,9 +12,14 @@ async def get_or_create_customer(session: AsyncSession, email: str) -> User:
     user = result.scalar_one_or_none()
 
     if user is None:
-        user = User(role=Role.customer, email=email_lower)
-        session.add(user)
-        await session.flush()
+        try:
+            async with session.begin_nested():
+                user = User(role=Role.customer, email=email_lower, is_active=True, failed_logins=0)
+                session.add(user)
+                await session.flush()
+        except IntegrityError:
+            result = await session.execute(select(User).where(User.email == email_lower))
+            user = result.scalar_one()
     return user
 
 

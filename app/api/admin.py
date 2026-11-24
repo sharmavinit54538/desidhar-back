@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db
 from app.services.auth_service import authenticate_admin
-from app.core.tokens import create_admin_token
+from app.core.tokens import create_admin_token, create_refresh_token
 from app.schemas.auth import AdminLogin, TokenResponse
 from app.core.rate_limit import limiter
 
@@ -22,4 +22,5 @@ async def admin_login(request: Request, data: AdminLogin, db: AsyncSession = Dep
             raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Account locked, try again later")
 
     token = create_admin_token(str(user.id))
-    return TokenResponse(access_token=token, expires_in=30 * 60)
+    refresh_tok = create_refresh_token(str(user.id), "admin")
+    return TokenResponse(access_token=token, token_type="bearer", expires_in=30 * 60, refresh_token=refresh_tok)

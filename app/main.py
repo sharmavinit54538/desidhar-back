@@ -3,12 +3,16 @@ from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from app.core.config import get_settings
+from app.core.rate_limit import limiter
 from app.api import (
     auth, admin, me, categories, products, admin_categories, admin_products,
     delivery, admin_pincodes, admin_pincodes_bulk, admin_product_delivery,
     addresses, cart, checkout, admin_coupons,
     orders, admin_orders, payments, payment_methods, admin_payment_methods,
+    contact,
 )
 
 settings = get_settings()
@@ -20,6 +24,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="DesiDhar Auth", lifespan=lifespan)
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -65,7 +72,7 @@ app.include_router(admin_orders.router)
 app.include_router(payments.router)
 app.include_router(payment_methods.router)
 app.include_router(admin_payment_methods.router)
-
+app.include_router(contact.router)
 
 
 @app.get("/health")

@@ -3,6 +3,7 @@ from app.api import (
     delivery, admin_pincodes, admin_pincodes_bulk, admin_product_delivery,
     addresses, cart, checkout, admin_coupons,
     orders, admin_orders, payments, payment_methods, admin_payment_methods,
+    contact,
 )
 
 __all__ = [
@@ -10,5 +11,6 @@ __all__ = [
     "delivery", "admin_pincodes", "admin_pincodes_bulk", "admin_product_delivery",
     "addresses", "cart", "checkout", "admin_coupons",
     "orders", "admin_orders", "payments", "payment_methods", "admin_payment_methods",
+    "contact",
 ]
 

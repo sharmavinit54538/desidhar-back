@@ -19,3 +19,10 @@ class MockPaymentProvider(PaymentProvider):
         valid = signature == f"mock_sig_{p_ord}"
         return valid, p_ord, p_pay, amt
 
+    async def refund_payment(self, provider_payment_id: str, amount_paise: int) -> dict:
+        return {
+            "refund_id": f"mock_ref_{uuid.uuid4().hex[:12]}",
+            "amount_paise": amount_paise,
+            "status": "processed",
+        }
+

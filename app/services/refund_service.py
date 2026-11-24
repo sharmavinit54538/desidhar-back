@@ -1,9 +1,12 @@
 import uuid
+from datetime import datetime, timezone
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.order import Order, PaymentStatus
+from app.models.order import Order, PaymentMethod, PaymentStatus
+from app.models.payment import Payment
 from app.models.order_item import OrderItem
 from app.models.refund import Refund, RefundReason
+from app.services.payment_service import provider
 
 
 async def create_refund(
@@ -16,6 +19,16 @@ async def create_refund(
     existing_refunded = sum(r.amount_paise for r in order.refunds)
     if existing_refunded + amount_paise > order.total_paise:
         return None, f"Total refunded amount cannot exceed paid total of ₹{order.total_paise // 100}"
+
+    payment = (await session.execute(select(Payment).where(Payment.order_id == order_id))).scalars().first()
+    if payment and payment.method == PaymentMethod.online and payment.status == PaymentStatus.paid:
+        if not payment.provider_payment_id:
+            return None, "Payment provider ID not found for refund"
+        try:
+            refund_result = await provider.refund_payment(payment.provider_payment_id, amount_paise)
+            payment.raw_payload = {**(payment.raw_payload or {}), "last_refund": refund_result}
+        except Exception as e:
+            return None, f"Payment gateway refund failed: {str(e)}"
 
     if restock and item_id:
         it = (await session.execute(select(OrderItem).where(OrderItem.id == item_id, OrderItem.order_id == order_id))).scalar_one_or_none()

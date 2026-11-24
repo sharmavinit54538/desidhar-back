@@ -25,14 +25,14 @@ def _generate_otp() -> str:
 async def create_otp(session: AsyncSession, email: str) -> str:
     email_lower = email.lower().strip()
 
-    await session.execute(delete(OTPCode).where(OTPCode.email == email_lower))
-
     result = await session.execute(
         select(OTPCode).where(OTPCode.email == email_lower).order_by(OTPCode.created_at.desc()).limit(1)
     )
     last_otp = result.scalar_one_or_none()
     if last_otp and utc_now() - last_otp.created_at < RESEND_COOLDOWN:
         raise ValueError("cooldown")
+
+    await session.execute(delete(OTPCode).where(OTPCode.email == email_lower))
 
     otp = _generate_otp()
     code_hash = _hash_otp(otp)

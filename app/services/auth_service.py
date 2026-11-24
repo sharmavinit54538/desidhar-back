@@ -26,13 +26,13 @@ async def authenticate_admin(session: AsyncSession, username: str, password: str
         verify_password(password, dummy_hash())
         return None
 
-    if user.locked_until and user.locked_until > user.locked_until.replace(tzinfo=None):
+    from app.core.clock import utc_now
+    if user.locked_until and user.locked_until > utc_now():
         return None
 
     if not verify_password(password, user.password_hash):
         user.failed_logins += 1
         if user.failed_logins >= 5:
-            from app.core.clock import utc_now
             from datetime import timedelta
             user.locked_until = utc_now() + timedelta(minutes=15)
         return None

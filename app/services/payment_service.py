@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -5,16 +6,30 @@ from app.models.order import Order, OrderStatus, PaymentStatus
 from app.models.payment import Payment
 from app.models.order_status_history import OrderStatusHistory
 from app.services.payments.mock_provider import MockPaymentProvider
+from app.services.payments.razorpay_provider import RazorpayPaymentProvider
 from app.services.stock_service import release_stock
+from app.core.config import get_settings
 
-provider = MockPaymentProvider()
+settings = get_settings()
+
+if settings.APP_ENV == "production" and settings.PAYMENT_PROVIDER == "mock":
+    raise RuntimeError("Mock payment provider is not allowed in production. Set PAYMENT_PROVIDER=razorpay and configure Razorpay credentials.")
+
+if settings.PAYMENT_PROVIDER == "razorpay":
+    if not settings.razorpay_configured:
+        raise RuntimeError("Razorpay payment provider selected but RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are not configured.")
+    provider = RazorpayPaymentProvider()
+else:
+    if settings.APP_ENV == "production":
+        raise RuntimeError("Invalid payment provider configuration for production.")
+    provider = MockPaymentProvider()
 
 
 async def initiate_payment(session: AsyncSession, order: Order) -> dict:
     res = await provider.create_order(order.total_paise, order.order_number)
     pm = (await session.execute(select(Payment).where(Payment.order_id == order.id))).scalars().first()
     if pm:
-        pm.provider = "mock"
+        pm.provider = settings.PAYMENT_PROVIDER
         pm.provider_order_id = res["provider_order_id"]
     await session.flush()
     return {**res, "order_id": order.id, "order_number": order.order_number}
@@ -41,10 +56,18 @@ async def confirm_payment_success(session: AsyncSession, p_order_id: str, p_pay_
     return order
 
 
-async def verify_payment(session: AsyncSession, payload: dict) -> tuple[bool, Order | None]:
+async def verify_payment(session: AsyncSession, payload: dict, user_id: uuid.UUID) -> tuple[bool, Order | None]:
     if not await provider.verify_payment(payload):
         return False, None
-    order = await confirm_payment_success(session, payload.get("provider_order_id", ""), payload.get("provider_payment_id", "mock_pay"))
+    p_order_id = payload.get("provider_order_id", "") or payload.get("razorpay_order_id", "")
+    p_pay_id = payload.get("provider_payment_id", "") or payload.get("razorpay_payment_id", "mock_pay")
+    pm = (await session.execute(select(Payment).where(Payment.provider_order_id == p_order_id))).scalars().first()
+    if not pm:
+        return False, None
+    order = (await session.execute(select(Order).where(Order.id == pm.order_id, Order.user_id == user_id))).scalar_one_or_none()
+    if not order:
+        return False, None
+    order = await confirm_payment_success(session, p_order_id, p_pay_id)
     return True, order
 
 
@@ -52,6 +75,12 @@ async def process_webhook(session: AsyncSession, payload: dict, sig: str) -> tup
     valid, p_ord, p_pay, _ = await provider.parse_webhook(payload, sig)
     if not valid:
         return False, None
+    pm = (await session.execute(select(Payment).where(Payment.provider_order_id == p_ord))).scalars().first()
+    if not pm:
+        return False, None
+    if pm.status == PaymentStatus.paid:
+        order = (await session.execute(select(Order).where(Order.id == pm.order_id))).scalar_one()
+        return True, order
     order = await confirm_payment_success(session, p_ord, p_pay)
     return True, order
 

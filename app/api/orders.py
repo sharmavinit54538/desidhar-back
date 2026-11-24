@@ -3,10 +3,12 @@ from fastapi import APIRouter, Depends, HTTPException, Header, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db, get_current_user
 from app.models.user import User
-from app.schemas.order import OrderCreateIn, OrderOut, OrderListOut, CancelOrderIn
+from app.models.order import PaymentMethod
+from app.schemas.order import OrderCreateIn, OrderOut, OrderListOut, CancelOrderIn, PlaceOrderResponse
 from app.services.order_service import (
     place_order, get_user_order, list_user_orders, transition_order_status,
 )
+from app.services.payment_service import initiate_payment
 
 from sqlalchemy import delete
 from app.models.cart_item import CartItem
@@ -15,7 +17,7 @@ from app.services.cart_service import get_or_create_cart
 router = APIRouter(prefix="/orders", tags=["orders"])
 
 
-@router.post("", response_model=OrderOut, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=PlaceOrderResponse, status_code=status.HTTP_201_CREATED)
 async def create_order(
     data: OrderCreateIn,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
@@ -33,7 +35,13 @@ async def create_order(
     order, err = await place_order(db, user, data.address_id, data.payment_method, key, data.coupon_code, data.notes)
     if err or not order:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=err or "Could not place order")
-    return order
+
+    payment_url = None
+    if order.payment_method == PaymentMethod.online:
+        payment_data = await initiate_payment(db, order)
+        payment_url = f"/payments/checkout?order_id={order.id}&provider_order_id={payment_data['provider_order_id']}"
+
+    return PlaceOrderResponse(order=order, payment_url=payment_url)
 
 
 

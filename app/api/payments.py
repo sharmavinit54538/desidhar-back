@@ -23,8 +23,16 @@ async def start_payment(order_id: uuid.UUID, db: AsyncSession = Depends(get_db),
 
 
 @router.post("/payments/verify", response_model=OrderOut)
-async def verify(data: PaymentVerifyIn, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    ok, order = await verify_payment(db, data.model_dump())
+async def verify(data: PaymentVerifyIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    payload = {
+        "provider_order_id": data.get_provider_order_id(),
+        "provider_payment_id": data.get_provider_payment_id(),
+        "signature": data.get_signature(),
+        "razorpay_order_id": data.get_provider_order_id(),
+        "razorpay_payment_id": data.get_provider_payment_id(),
+        "razorpay_signature": data.get_signature(),
+    }
+    ok, order = await verify_payment(db, payload, user.id)
     if not ok or not order:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payment verification failed")
     return order

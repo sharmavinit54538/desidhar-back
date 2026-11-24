@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, status
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db
 from app.services.otp_service import create_otp, verify_otp
@@ -6,12 +6,15 @@ from app.services.email_service import send_otp_email
 from app.services.auth_service import get_or_create_customer
 from app.core.tokens import create_customer_token
 from app.schemas.auth import OTPRequest, OTPVerify, TokenResponse
+from app.core.rate_limit import limiter
 
 router = APIRouter(prefix="/auth/otp", tags=["auth"])
 
 
 @router.post("/request", status_code=status.HTTP_202_ACCEPTED)
+@limiter.limit("5/minute")
 async def request_otp(
+    request: Request,
     data: OTPRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
@@ -27,7 +30,8 @@ async def request_otp(
 
 
 @router.post("/verify", response_model=TokenResponse)
-async def verify_otp_endpoint(data: OTPVerify, db: AsyncSession = Depends(get_db)):
+@limiter.limit("10/minute")
+async def verify_otp_endpoint(request: Request, data: OTPVerify, db: AsyncSession = Depends(get_db)):
     valid = await verify_otp(db, data.email, data.otp)
     if not valid:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired OTP")

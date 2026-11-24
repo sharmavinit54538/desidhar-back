@@ -14,3 +14,7 @@ class PaymentProvider(ABC):
     async def parse_webhook(self, payload: dict, signature: str) -> tuple[bool, str, str, int]:
         pass
 
+    @abstractmethod
+    async def refund_payment(self, provider_payment_id: str, amount_paise: int) -> dict:
+        pass
+

@@ -1,15 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db
 from app.services.auth_service import authenticate_admin
 from app.core.tokens import create_admin_token
 from app.schemas.auth import AdminLogin, TokenResponse
+from app.core.rate_limit import limiter
 
 router = APIRouter(prefix="/admin/auth", tags=["admin"])
 
 
 @router.post("/login", response_model=TokenResponse)
-async def admin_login(data: AdminLogin, db: AsyncSession = Depends(get_db)):
+@limiter.limit("5/minute")
+async def admin_login(request: Request, data: AdminLogin, db: AsyncSession = Depends(get_db)):
     user = await authenticate_admin(db, data.username, data.password)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")

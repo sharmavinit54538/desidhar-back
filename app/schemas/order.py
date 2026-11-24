@@ -128,6 +128,11 @@ class OrderOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class PlaceOrderResponse(BaseModel):
+    order: OrderOut
+    payment_url: str | None = None
+
+
 class OrderListOut(BaseModel):
     items: list[OrderOut]
     total: int

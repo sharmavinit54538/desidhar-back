@@ -35,6 +35,13 @@ class AddressUpdate(BaseModel):
     pincode: str | None = Field(default=None, pattern=r"^[1-9][0-9]{5}$")
     is_default: bool | None = None
 
+    @field_validator("full_name", "phone", "line1", "city", "state", "pincode", "is_default", mode="before")
+    @classmethod
+    def reject_required_null(cls, v):
+        if v is None:
+            raise ValueError("Field may be omitted but cannot be null")
+        return v
+
     @field_validator("full_name", "phone", "line1", "line2", "landmark", "city", "state", "pincode", mode="before")
     @classmethod
     def strip_opt_str(cls, v):

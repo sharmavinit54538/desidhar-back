@@ -18,7 +18,7 @@ class Pincode(Base):
     delivery_fee_paise: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     free_delivery_above_paise: Mapped[int | None] = mapped_column(Integer, nullable=True)
     min_order_paise: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    cod_available: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    cod_available: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
     eta_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)

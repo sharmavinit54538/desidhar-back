@@ -88,9 +88,10 @@ async def evaluate_checkout(
         else:
             del_fee = pin_rec.delivery_fee_paise
 
-    cod_avail = pin_rec.cod_available if pin_rec else False
+    # Cash on delivery is available for all serviceable delivery pincodes unless explicitly disabled
+    cod_avail = pin_rec.cod_available if (pin_rec and pin_rec.cod_available is not None) else (pin_rec is not None and pin_rec.is_serviceable)
     if payment_method == "cod" and not cod_avail:
-        reasons.append(f"Cash on Delivery is unavailable for pincode {addr.pincode}")
+        reasons.append(f"Cash on Delivery is currently unavailable for pincode {addr.pincode}")
 
     discounts = allocate_discount(item_tuples, discount)
     items_out = []

@@ -51,6 +51,26 @@ async def change_status(
     return order
 
 
+@router.post("/{order_id}/mark-paid", response_model=OrderOut)
+async def mark_order_paid(
+    order_id: uuid.UUID, db: AsyncSession = Depends(get_db), admin: User = Depends(require_admin),
+):
+    order = (await db.execute(select(Order).where(Order.id == order_id))).scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+    from datetime import datetime, timezone
+    from app.models.order import PaymentStatus
+    from app.models.payment import Payment
+    now = datetime.now(timezone.utc)
+    order.payment_status = PaymentStatus.paid
+    for p in order.payments:
+        p.status = PaymentStatus.paid
+        p.paid_at = now
+    await db.flush()
+    await db.refresh(order)
+    return order
+
+
 @router.post("/{order_id}/refunds", response_model=RefundOut, status_code=status.HTTP_201_CREATED)
 async def refund_order(
     order_id: uuid.UUID, data: RefundCreateIn, db: AsyncSession = Depends(get_db), admin: User = Depends(require_admin),

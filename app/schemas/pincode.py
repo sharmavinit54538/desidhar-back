@@ -12,7 +12,7 @@ class PincodeBase(BaseModel):
     delivery_fee_paise: int = Field(default=0, ge=0)
     free_delivery_above_paise: int | None = Field(default=None, ge=0)
     min_order_paise: int = Field(default=0, ge=0)
-    cod_available: bool = False
+    cod_available: bool = True
     eta_hours: int | None = Field(default=None, ge=0)
 
     @field_validator("pincode", "area_name", "city", "state", mode="before")

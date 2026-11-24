@@ -5,7 +5,7 @@ from app.models.pincode import Pincode
 from app.schemas.payment_method import PaymentMethodOut
 
 DEFAULT_METHODS = [
-    {"id": "cod", "code": "cod", "name": "Cash on Delivery", "type": "cod", "enabled": True, "description": "Pay with cash upon delivery", "icon": "banknote", "min_order": 0, "max_order": 5000, "sort_order": 1},
+    {"id": "cod", "code": "cod", "name": "Cash on Delivery", "type": "cod", "enabled": True, "description": "Pay with cash or UPI upon delivery", "icon": "banknote", "min_order": 0, "max_order": 50000, "sort_order": 1},
     {"id": "upi", "code": "upi", "name": "UPI", "type": "online", "enabled": True, "description": "Google Pay, PhonePe, Paytm, BHIM", "icon": "smartphone", "min_order": 0, "max_order": None, "sort_order": 2},
     {"id": "card", "code": "card", "name": "Credit / Debit Card", "type": "online", "enabled": True, "description": "Visa, Mastercard, RuPay", "icon": "credit-card", "min_order": 0, "max_order": None, "sort_order": 3},
     {"id": "netbanking", "code": "netbanking", "name": "Net Banking", "type": "online", "enabled": True, "description": "All major Indian banks", "icon": "landmark", "min_order": 0, "max_order": None, "sort_order": 4},
@@ -38,7 +38,11 @@ async def list_payment_methods(
     cod_allowed = True
     if pincode:
         pin = (await session.execute(select(Pincode).where(Pincode.pincode == pincode.strip()))).scalar_one_or_none()
-        if pin and (not pin.cod_available or not pin.is_serviceable):
+        # If pincode is serviceable, allow COD by default
+        if pin and not pin.is_serviceable:
+            cod_allowed = False
+        elif pin and pin.cod_available is False:
+            # Only disallow if explicitly set to False
             cod_allowed = False
 
     result: list[PaymentMethodOut] = []

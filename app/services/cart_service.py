@@ -15,22 +15,115 @@ async def get_or_create_cart(session: AsyncSession, user_id: uuid.UUID) -> Cart:
     return cart
 
 
+def _product_image_url(product) -> str | None:
+    """Get the primary image URL for a product from its images relationship."""
+    if product.images:
+        return product.images[0].url
+    return None
+
+
+def _variant_label(product) -> str:
+    """Generate a readable variant/pack label like '500 ml' or '1 kg'."""
+    unit_str = product.unit.value if hasattr(product.unit, "value") else str(product.unit)
+    pack = product.pack_size
+    # Clean up trailing zeros for display: "1.00" -> "1", "0.50" -> "0.5"
+    try:
+        num = float(pack)
+        pack_str = f"{num:g}"
+    except (ValueError, TypeError):
+        pack_str = str(pack)
+    return f"{pack_str} {unit_str}"
+
+
 async def get_cart_view(session: AsyncSession, user_id: uuid.UUID) -> dict:
     cart = await get_or_create_cart(session, user_id)
     items_out = []
     subtotal = 0
+    total_mrp = 0
     for item in cart.items:
         p = item.product
         line = p.price_paise * item.quantity
+        mrp_line = p.mrp_paise * item.quantity
         subtotal += line
-        warning = f"Only {p.stock_qty} left in stock" if p.stock_qty < item.quantity else None
+        total_mrp += mrp_line
+        item_discount = mrp_line - line
+        discount_percent = round((1 - p.price_paise / p.mrp_paise) * 100, 1) if p.mrp_paise > 0 else 0.0
+
+        warning = None
+        if not p.is_active:
+            warning = "This product is currently unavailable"
+        elif p.stock_qty <= 0:
+            warning = "Out of stock"
+        elif p.stock_qty < item.quantity:
+            warning = f"Only {p.stock_qty} left in stock"
+
+        # Get category info
+        cat_name = None
+        cat_slug = None
+        if p.category:
+            cat_name = p.category.name
+            cat_slug = p.category.slug
+
+        # Get image URL
+        image_url = _product_image_url(p)
+
+        # Short description (first 140 chars)
+        short_desc = None
+        if p.description:
+            short_desc = p.description[:140] if len(p.description) > 140 else p.description
+
         items_out.append({
-            "id": item.id, "product_id": p.id, "name": p.name, "slug": p.slug, "unit": p.unit.value,
-            "pack_size": p.pack_size, "unit_price_paise": p.price_paise, "unit_mrp_paise": p.mrp_paise,
-            "quantity": item.quantity, "line_total_paise": line, "stock_qty": p.stock_qty,
-            "is_active": p.is_active, "stock_warning": warning,
+            "id": item.id,
+            "product_id": p.id,
+            "name": p.name,
+            "slug": p.slug,
+            "unit": p.unit.value,
+            "pack_size": p.pack_size,
+            "unit_price_paise": p.price_paise,
+            "unit_mrp_paise": p.mrp_paise,
+            "quantity": item.quantity,
+            "line_total_paise": line,
+            "line_mrp_total_paise": mrp_line,
+            "discount_paise": item_discount,
+            "discount_percent": discount_percent,
+            "stock_qty": p.stock_qty,
+            "max_qty_per_order": p.max_qty_per_order,
+            "is_active": p.is_active,
+            "stock_warning": warning,
+            "image_url": image_url,
+            "category_name": cat_name,
+            "category_slug": cat_slug,
+            "description": short_desc,
+            "is_veg": p.is_veg,
+            "gst_rate_percent": float(p.gst_rate_percent),
+            "variant_label": _variant_label(p),
         })
-    return {"id": cart.id, "items": items_out, "subtotal_paise": subtotal, "item_count": sum(i["quantity"] for i in items_out)}
+
+    product_discount = total_mrp - subtotal
+    item_count = sum(i["quantity"] for i in items_out)
+
+    summary = {
+        "item_count": item_count,
+        "total_mrp_paise": total_mrp,
+        "product_discount_paise": product_discount,
+        "coupon_discount_paise": 0,
+        "coupon_code": None,
+        "subtotal_paise": subtotal,
+        "delivery_charge_paise": None,  # Calculated at checkout with address
+        "delivery_charge_note": "Calculated at checkout",
+        "packaging_charge_paise": 0,
+        "tax_paise": 0,  # Prices are tax-inclusive
+        "total_savings_paise": product_discount,
+        "total_paise": subtotal,
+    }
+
+    return {
+        "id": cart.id,
+        "items": items_out,
+        "subtotal_paise": subtotal,
+        "item_count": item_count,
+        "summary": summary,
+    }
 
 
 async def update_cart_item(session: AsyncSession, user_id: uuid.UUID, prod_id: uuid.UUID, qty: int) -> tuple[bool, str | None]:
@@ -55,6 +148,18 @@ async def update_cart_item(session: AsyncSession, user_id: uuid.UUID, prod_id: u
     else:
         session.add(CartItem(cart_id=cart.id, product_id=prod_id, quantity=qty))
     await session.flush()
+    return True, None
+
+
+async def remove_cart_item(session: AsyncSession, user_id: uuid.UUID, prod_id: uuid.UUID) -> tuple[bool, str | None]:
+    """Remove a specific item from cart by product_id."""
+    cart = await get_or_create_cart(session, user_id)
+    result = await session.execute(
+        delete(CartItem).where(CartItem.cart_id == cart.id, CartItem.product_id == prod_id)
+    )
+    await session.flush()
+    if result.rowcount == 0:
+        return False, "Item not found in cart"
     return True, None
 
 
@@ -154,6 +259,7 @@ async def validate_cart_items(
             "quantity": qty,
             "price": price_rupees,
             "unit_price": price_rupees,
+            "mrp": round(product.mrp_paise / 100.0, 2),
             "line_total": line_total,
             "available_stock": product.stock_qty,
             "is_valid": is_valid,
@@ -162,6 +268,9 @@ async def validate_cart_items(
             "message": item_issues[0] if item_issues else None,
             "name": product.name,
             "variant_label": pack_label,
+            "image_url": _product_image_url(product),
+            "slug": product.slug,
+            "discount_percent": round((1 - product.price_paise / product.mrp_paise) * 100, 1) if product.mrp_paise > 0 else 0.0,
         })
 
     all_valid = all(i["is_valid"] for i in validated_items) if validated_items else True

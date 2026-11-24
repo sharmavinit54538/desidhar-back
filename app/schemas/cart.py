@@ -18,11 +18,37 @@ class CartItemOut(BaseModel):
     unit_mrp_paise: int
     quantity: int
     line_total_paise: int
+    line_mrp_total_paise: int = 0
+    discount_paise: int = 0
+    discount_percent: float = 0.0
     stock_qty: int
+    max_qty_per_order: int = 10
     is_active: bool
     stock_warning: str | None = None
+    image_url: str | None = None
+    category_name: str | None = None
+    category_slug: str | None = None
+    description: str | None = None
+    is_veg: bool = True
+    gst_rate_percent: float = 0.0
+    variant_label: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class CartSummaryOut(BaseModel):
+    item_count: int = 0
+    total_mrp_paise: int = 0
+    product_discount_paise: int = 0
+    coupon_discount_paise: int = 0
+    coupon_code: str | None = None
+    subtotal_paise: int = 0
+    delivery_charge_paise: int | None = None
+    delivery_charge_note: str | None = None
+    packaging_charge_paise: int = 0
+    tax_paise: int = 0
+    total_savings_paise: int = 0
+    total_paise: int = 0
 
 
 class CartOut(BaseModel):
@@ -30,6 +56,7 @@ class CartOut(BaseModel):
     items: list[CartItemOut]
     subtotal_paise: int
     item_count: int
+    summary: CartSummaryOut
 
 
 class CartItemValidateIn(BaseModel):
@@ -48,6 +75,7 @@ class CartItemValidateOut(BaseModel):
     quantity: int
     price: float
     unit_price: float
+    mrp: float = 0.0
     line_total: float
     available_stock: int
     is_valid: bool
@@ -56,6 +84,9 @@ class CartItemValidateOut(BaseModel):
     message: str | None = None
     name: str | None = None
     variant_label: str | None = None
+    image_url: str | None = None
+    slug: str | None = None
+    discount_percent: float = 0.0
 
     model_config = ConfigDict(from_attributes=True)
 

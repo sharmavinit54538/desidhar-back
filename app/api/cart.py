@@ -8,7 +8,7 @@ from app.schemas.cart import (
     CartOut, CartItemUpdateIn, CartValidateIn, CartItemValidateIn, CartValidateOut,
 )
 from app.services.cart_service import (
-    get_cart_view, update_cart_item, clear_cart, validate_cart_items,
+    get_cart_view, update_cart_item, clear_cart, validate_cart_items, remove_cart_item,
 )
 
 router = APIRouter(prefix="/cart", tags=["cart"])
@@ -35,6 +35,16 @@ async def set_item_qty(
     ok, err = await update_cart_item(db, user.id, product_id, data.quantity)
     if not ok:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=err)
+    return await get_cart_view(db, user.id)
+
+
+@router.delete("/items/{product_id}", response_model=CartOut)
+async def delete_item(
+    product_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+):
+    ok, err = await remove_cart_item(db, user.id, product_id)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=err)
     return await get_cart_view(db, user.id)
 
 

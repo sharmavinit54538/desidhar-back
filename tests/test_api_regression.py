@@ -43,6 +43,16 @@ async def test_products_api(client: AsyncClient):
         assert "price_paise" in detail
         assert "cost_price_paise" in detail
         assert "gst_rate_percent" in detail
+        assert "images" in detail
+        assert isinstance(detail["images"], list)
+        assert len(detail["images"]) > 0
+        img_url = detail["images"][0]["url"]
+        assert img_url.startswith("/static/products/")
+
+        # Verify static file mount serves product image
+        static_res = await client.get(img_url)
+        assert static_res.status_code == 200
+        assert "image" in static_res.headers.get("content-type", "")
 
 
 @pytest.mark.asyncio

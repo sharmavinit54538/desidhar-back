@@ -1,9 +1,11 @@
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from app.core.config import get_settings
@@ -75,6 +77,11 @@ app.include_router(payments.router)
 app.include_router(payment_methods.router)
 app.include_router(admin_payment_methods.router)
 app.include_router(contact.router)
+
+# Mount static files for product images and media
+static_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "static"))
+os.makedirs(os.path.join(static_dir, "products"), exist_ok=True)
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
 @app.get("/health")

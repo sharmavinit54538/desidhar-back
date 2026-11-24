@@ -5,7 +5,35 @@ from sqlalchemy import select
 from app.core.db import async_session_maker
 from app.models.category import Category
 from app.models.product import Product, UnitEnum
+from app.models.product_image import ProductImage
 from app.services.slug_service import generate_unique_slug
+
+PRODUCT_IMAGE_MAP = {
+    "Full Cream Milk": [
+        {"url": "/static/products/product-milk.jpg", "sort_order": 0},
+        {"url": "/static/products/product-photo-sheet.jpg", "sort_order": 1},
+    ],
+    "Toned Milk": [{"url": "/static/products/product-milk.jpg", "sort_order": 0}],
+    "Cow Milk": [{"url": "/static/products/product-milk.jpg", "sort_order": 0}],
+    "Pure Desi Ghee": [
+        {"url": "/static/products/product-ghee.jpg", "sort_order": 0},
+        {"url": "/static/products/story-churning.jpg", "sort_order": 1},
+    ],
+    "Amul Butter": [{"url": "/static/products/product-ghee.jpg", "sort_order": 0}],
+    "White Butter (Makhan)": [{"url": "/static/products/product-ghee.jpg", "sort_order": 0}],
+    "Fresh Paneer": [
+        {"url": "/static/products/product-dahi.jpg", "sort_order": 0},
+        {"url": "/static/products/product-photo-sheet.jpg", "sort_order": 1},
+    ],
+    "Malai Paneer": [{"url": "/static/products/product-mava.jpg", "sort_order": 0}],
+    "Fresh Cream": [{"url": "/static/products/product-dahi.jpg", "sort_order": 0}],
+    "Rasgulla": [{"url": "/static/products/product-burfi.jpg", "sort_order": 0}],
+    "Gulab Jamun": [
+        {"url": "/static/products/product-milk-cake.jpg", "sort_order": 0},
+        {"url": "/static/products/product-photo-sheet.jpg", "sort_order": 1},
+    ],
+    "Kaju Katli": [{"url": "/static/products/product-burfi.jpg", "sort_order": 0}],
+}
 
 CATEGORIES = [
     {"name": "Milk", "sort_order": 1},
@@ -49,7 +77,11 @@ async def seed() -> None:
         # Seed products
         for p in PRODUCTS:
             result = await session.execute(select(Product).where(Product.name == p["name"]))
-            if result.scalar_one_or_none():
+            existing_prod = result.scalar_one_or_none()
+            if existing_prod:
+                if not existing_prod.images and p["name"] in PRODUCT_IMAGE_MAP:
+                    for img in PRODUCT_IMAGE_MAP[p["name"]]:
+                        session.add(ProductImage(product_id=existing_prod.id, url=img["url"], sort_order=img["sort_order"]))
                 continue
             slug = await generate_unique_slug(session, Product, p["name"])
             product = Product(
@@ -65,6 +97,10 @@ async def seed() -> None:
                 shelf_life_days=p.get("shelf_life_days"),
             )
             session.add(product)
+            await session.flush()
+            if p["name"] in PRODUCT_IMAGE_MAP:
+                for img in PRODUCT_IMAGE_MAP[p["name"]]:
+                    session.add(ProductImage(product_id=product.id, url=img["url"], sort_order=img["sort_order"]))
 
         await session.commit()
         print(f"Seeded {len(CATEGORIES)} categories and {len(PRODUCTS)} products")

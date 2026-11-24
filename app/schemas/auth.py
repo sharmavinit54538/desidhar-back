@@ -24,10 +24,19 @@ class TokenResponse(BaseModel):
     model_config = ConfigDict(json_schema_extra={"example": {"access_token": "eyJ...", "token_type": "bearer", "expires_in": 3600}})
 
 
+class UserUpdate(BaseModel):
+    full_name: str | None = Field(default=None, min_length=1, max_length=100)
+    phone: str | None = Field(default=None, pattern=r"^[6-9][0-9]{9}$")
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+
 class UserResponse(BaseModel):
     id: str
     role: str
     email: str | None = None
+    full_name: str | None = None
+    phone: str | None = None
     username: str | None = None
     is_active: bool
     created_at: str

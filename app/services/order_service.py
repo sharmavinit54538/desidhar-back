@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import select, text, func, or_
+from sqlalchemy import select, text, func, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.user import User
 from app.models.order import Order, OrderStatus, PaymentMethod, PaymentStatus
@@ -12,6 +12,7 @@ from app.services.checkout_service import evaluate_checkout
 from app.services.stock_service import reserve_stock, release_stock
 from app.services.order_transition import can_transition
 from app.services.cart_service import clear_cart
+from app.models.order_lifecycle import Shipment, OrderNotification, OrderAuditLog
 
 
 async def generate_order_number(session: AsyncSession) -> str:
@@ -89,8 +90,13 @@ async def place_order(
 
 async def transition_order_status(
     session: AsyncSession, order: Order, target: str, changed_by: uuid.UUID | None = None,
-    note: str | None = None, is_admin: bool = False,
+    note: str | None = None, is_admin: bool = False, expected_version: int | None = None,
 ) -> tuple[bool, str | None]:
+    # Serialize competing transitions and reject stale admin/customer forms.
+    locked = (await session.execute(select(Order).where(Order.id == order.id).with_for_update())).scalar_one()
+    if expected_version is not None and locked.version != expected_version:
+        return False, "Order changed since it was loaded; refresh and try again"
+    order = locked
     ok, err = can_transition(order.status.value, target, is_admin=is_admin)
     if not ok:
         return False, err
@@ -98,8 +104,24 @@ async def transition_order_status(
     prev = order.status.value
     order.status = OrderStatus(target)
     now = datetime.now(timezone.utc)
+    order.version += 1
+    order.updated_at = now
     if target == OrderStatus.confirmed.value:
         order.confirmed_at = now
+    elif target == OrderStatus.packed.value:
+        order.packed_at = now
+    elif target == OrderStatus.shipped.value:
+        order.shipped_at = now
+        shipment = order.shipment
+        if not shipment:
+            shipment = Shipment(order_id=order.id, courier_name="DesiDhar Logistics", shipment_reference=order.order_number,
+                                shipment_status=target, shipped_at=now)
+            session.add(shipment)
+        else:
+            shipment.shipment_status = target
+            shipment.shipped_at = now
+    elif target == OrderStatus.out_for_delivery.value:
+        order.out_for_delivery_at = now
     elif target == OrderStatus.delivered.value:
         order.delivered_at = now
         for p in order.payments:
@@ -110,9 +132,26 @@ async def transition_order_status(
     elif target == OrderStatus.cancelled.value:
         order.cancelled_at = now
         order.cancel_reason = note or "Cancelled"
-        await release_stock(session, [(it.product_id, it.quantity) for it in order.items])
+        if order.stock_reserved and not order.stock_released:
+            await release_stock(session, [(it.product_id, it.quantity) for it in order.items])
+            order.stock_released = True
+    elif target == OrderStatus.delivered.value and order.shipment:
+        order.shipment.shipment_status = target
+        order.shipment.delivered_at = now
+    elif order.shipment:
+        order.shipment.shipment_status = target
 
-    session.add(OrderStatusHistory(order_id=order.id, from_status=prev, to_status=target, changed_by=changed_by, note=note))
+    visible = note if is_admin and note else f"Order {target.replace('_', ' ')}"
+    session.add(OrderStatusHistory(order_id=order.id, from_status=prev, to_status=target, changed_by=changed_by,
+                                   note=note, actor_type="admin" if is_admin else "customer",
+                                   reason=note, customer_visible_message=visible, event_source="api"))
+    event_key = f"status:{order.version}:{target}"
+    session.add(OrderAuditLog(order_id=order.id, actor_id=changed_by,
+                              actor_type="admin" if is_admin else "customer", action="status_change",
+                              event_key=event_key, details={"from": prev, "to": target, "note": note}))
+    session.add(OrderNotification(order_id=order.id, user_id=order.user_id, event_type="order_status",
+                                  event_key=event_key, channel="in_app", recipient=None,
+                                  message=visible, payload={"order_id": str(order.id), "status": target}, status="queued"))
     await session.flush()
     return True, None
 

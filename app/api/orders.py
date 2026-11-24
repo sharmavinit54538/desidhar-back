@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db, get_current_user
 from app.models.user import User
 from app.models.order import PaymentMethod
-from app.schemas.order import OrderCreateIn, OrderOut, OrderListOut, CancelOrderIn, PlaceOrderResponse
+from app.schemas.order import OrderCreateIn, OrderOut, OrderListOut, CancelOrderIn, PlaceOrderResponse, CustomerReturnIn
 from app.services.order_service import (
     place_order, get_user_order, list_user_orders, transition_order_status,
 )
@@ -72,6 +72,19 @@ async def cancel_order(
     if not order:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
     ok, err = await transition_order_status(db, order, "cancelled", changed_by=user.id, note=data.reason, is_admin=False)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=err)
+    return order
+
+
+@router.post("/{order_id}/return-request", response_model=OrderOut)
+async def request_return(order_id: uuid.UUID, data: CustomerReturnIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    order = await get_user_order(db, user.id, order_id)
+    if not order:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+    if order.status.value != "delivered":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Returns can only be requested for delivered orders")
+    ok, err = await transition_order_status(db, order, "return_requested", changed_by=user.id, note=data.reason)
     if not ok:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=err)
     return order

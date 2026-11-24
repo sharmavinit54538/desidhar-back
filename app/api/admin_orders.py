@@ -1,17 +1,38 @@
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db, require_admin
 from app.models.user import User
 from app.models.order import Order
-from app.schemas.order import OrderOut, OrderListOut, OrderStatusUpdateIn
+from app.schemas.order import OrderOut, OrderListOut, OrderStatusUpdateIn, OrderSummaryOut
 from app.schemas.refund import RefundCreateIn, RefundOut
 from app.services.order_service import admin_list_orders, transition_order_status
 from app.services.refund_service import create_refund, list_order_refunds
 from app.services.payment_service import cancel_expired_unpaid_orders
 
 router = APIRouter(prefix="/admin/orders", tags=["admin-orders"])
+
+
+@router.get("/summary", response_model=OrderSummaryOut)
+async def order_summary(db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)):
+    from app.models.order import OrderStatus, PaymentMethod, PaymentStatus
+    from app.models.refund import Refund
+    statuses = (await db.execute(select(Order.status, func.count()).group_by(Order.status))).all()
+    counts = {str(s.value if hasattr(s, "value") else s): n for s, n in statuses}
+    refunds = await db.scalar(select(func.count()).select_from(Refund).where(Refund.status == "pending")) or 0
+    cod_q = select(func.count(), func.coalesce(func.sum(Order.total_paise), 0)).where(
+        Order.payment_method == PaymentMethod.cod, Order.payment_status != PaymentStatus.paid,
+        Order.status == OrderStatus.delivered)
+    cod_count, cod_amount = (await db.execute(cod_q)).one()
+    return OrderSummaryOut(
+        total_orders=sum(counts.values()), new_orders=counts.get("placed", 0),
+        confirmed_orders=counts.get("confirmed", 0), pending_packing=counts.get("confirmed", 0),
+        packed_orders=counts.get("packed", 0), shipped_orders=counts.get("shipped", 0),
+        out_for_delivery=counts.get("out_for_delivery", 0), delivered_orders=counts.get("delivered", 0),
+        cancelled_orders=counts.get("cancelled", 0), failed_deliveries=counts.get("delivery_failed", 0),
+        return_requests=counts.get("return_requested", 0), pending_refunds=refunds,
+        pending_cod_collection=cod_count, pending_cod_amount_paise=cod_amount)
 
 
 @router.get("", response_model=OrderListOut)
@@ -45,7 +66,7 @@ async def change_status(
     order = (await db.execute(select(Order).where(Order.id == order_id))).scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
-    ok, err = await transition_order_status(db, order, data.status, changed_by=admin.id, note=data.note, is_admin=True)
+    ok, err = await transition_order_status(db, order, data.status, changed_by=admin.id, note=data.note, is_admin=True, expected_version=data.expected_version)
     if not ok:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=err)
     return order

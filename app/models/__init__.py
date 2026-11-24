@@ -17,6 +17,8 @@ from app.models.order_status_history import OrderStatusHistory
 from app.models.payment import Payment
 from app.models.refund import Refund, RefundReason
 from app.models.payment_method import PaymentMethodRecord
+from app.models.invoice import Invoice
+from app.models.order_lifecycle import Shipment, InventoryTransaction, OrderOperation, OrderNotification, OrderAuditLog
 
 __all__ = [
     "User", "Role", "OTPCode", "Category", "Product", "UnitEnum",
@@ -25,5 +27,7 @@ __all__ = [
     "Order", "OrderStatus", "PaymentMethod", "PaymentStatus",
     "OrderItem", "OrderStatusHistory", "Payment", "Refund", "RefundReason",
     "PaymentMethodRecord",
+    "Invoice",
+    "Shipment", "InventoryTransaction", "OrderOperation", "OrderNotification", "OrderAuditLog",
 ]
 

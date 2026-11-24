@@ -81,8 +81,8 @@ class ShipmentIn(BaseModel):
 
 class OrderActionIn(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-    expected_version: int = Field(ge=1)
-    idempotency_key: str = Field(min_length=8, max_length=100)
+    expected_version: int | None = Field(default=None, ge=1)
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=100)
     reason: str | None = Field(default=None, min_length=2, max_length=255)
     customer_visible_message: str | None = Field(default=None, max_length=500)
     internal_admin_note: str | None = Field(default=None, max_length=1000)

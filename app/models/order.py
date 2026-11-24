@@ -1,7 +1,7 @@
 import enum
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Integer, Text, DateTime, Enum, ForeignKey, CheckConstraint, Index, UniqueConstraint
+from sqlalchemy import String, Integer, Text, DateTime, Enum, ForeignKey, CheckConstraint, Index, UniqueConstraint, Boolean, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.db import Base
@@ -12,10 +12,16 @@ class OrderStatus(str, enum.Enum):
     placed = "placed"
     confirmed = "confirmed"
     packed = "packed"
+    shipped = "shipped"
     out_for_delivery = "out_for_delivery"
     delivered = "delivered"
     delivery_failed = "delivery_failed"
     cancelled = "cancelled"
+    return_requested = "return_requested"
+    return_approved = "return_approved"
+    return_rejected = "return_rejected"
+    return_in_transit = "return_in_transit"
+    returned = "returned"
 
 
 class PaymentMethod(str, enum.Enum):
@@ -29,6 +35,8 @@ class PaymentStatus(str, enum.Enum):
     failed = "failed"
     refunded = "refunded"
     partially_refunded = "partially_refunded"
+    partially_paid = "partially_paid"
+    refund_pending = "refund_pending"
 
 
 class Order(Base):
@@ -58,9 +66,17 @@ class Order(Base):
     tax_paise: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     idempotency_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
+    stock_reserved: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
+    stock_released: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    return_restocked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    billing_address: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     placed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    packed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    shipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    out_for_delivery_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancel_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -72,6 +88,33 @@ class Order(Base):
     history = relationship("OrderStatusHistory", lazy="selectin", order_by="OrderStatusHistory.created_at", cascade="all, delete-orphan")
     payments = relationship("Payment", lazy="selectin", cascade="all, delete-orphan")
     refunds = relationship("Refund", lazy="selectin", cascade="all, delete-orphan")
+    customer = relationship("User", lazy="selectin")
+    shipment = relationship("Shipment", lazy="selectin", uselist=False)
+    invoice = relationship("Invoice", lazy="selectin", uselist=False)
+
+    @property
+    def amount_paid_paise(self) -> int:
+        return sum(payment.amount_paise for payment in self.payments if payment.paid_at is not None)
+
+    @property
+    def outstanding_paise(self) -> int:
+        return max(0, self.total_paise - self.amount_paid_paise)
+
+    @property
+    def refunded_amount_paise(self) -> int:
+        return sum(refund.amount_paise for refund in self.refunds if refund.status == "completed")
+
+    @property
+    def customer_email(self) -> str | None:
+        return self.customer.email if self.customer else None
+
+    @property
+    def invoice_available(self) -> bool:
+        return self.invoice is not None
+
+    @property
+    def delivery_status(self) -> str:
+        return self.shipment.shipment_status if self.shipment else self.status.value
 
     __table_args__ = (
         CheckConstraint("total_paise = subtotal_paise - discount_paise + delivery_fee_paise", name="ck_orders_total_consistency"),

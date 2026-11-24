@@ -1,7 +1,8 @@
 import uuid
 from decimal import Decimal
 from datetime import datetime
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
+from typing import Literal
 
 
 class OrderItemIn(BaseModel):
@@ -47,11 +48,73 @@ class OrderCreateIn(BaseModel):
 
 class CancelOrderIn(BaseModel):
     reason: str = Field(..., min_length=2, max_length=255)
+    expected_version: int | None = Field(default=None, ge=1)
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=100)
 
 
-class OrderStatusUpdateIn(BaseModel):
+class ShipmentIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    courier_name: str = Field(min_length=2, max_length=100)
+    tracking_number: str | None = Field(default=None, max_length=100)
+    tracking_url: str | None = Field(default=None, max_length=1000)
+    shipment_reference: str | None = Field(default=None, max_length=100)
+    shipped_at: datetime | None = None
+    estimated_delivery_at: datetime | None = None
+
+    @field_validator("tracking_url")
+    @classmethod
+    def safe_tracking_url(cls, value):
+        if value:
+            from urllib.parse import urlsplit
+            parsed = urlsplit(value)
+            if parsed.scheme not in ("https", "http") or not parsed.hostname or parsed.username or parsed.password:
+                raise ValueError("Tracking URL must be an HTTP(S) URL without credentials")
+        return value
+
+    @field_validator("shipped_at", "estimated_delivery_at")
+    @classmethod
+    def aware_date(cls, value):
+        if value is not None and value.tzinfo is None:
+            raise ValueError("Timestamp must include a timezone")
+        return value
+
+
+class OrderActionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    expected_version: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+    reason: str | None = Field(default=None, min_length=2, max_length=255)
+    customer_visible_message: str | None = Field(default=None, max_length=500)
+    internal_admin_note: str | None = Field(default=None, max_length=1000)
+    shipment: ShipmentIn | None = None
+    inspection_passed: bool = False
+    restock: bool = False
+
+
+class CustomerReturnIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    expected_version: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+    reason: str = Field(min_length=2, max_length=255)
+
+
+class CODCollectionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    expected_version: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+    amount_paise: int = Field(gt=0)
+    collection_method: Literal["cash", "upi", "card", "bank_transfer"]
+    reference: str = Field(min_length=2, max_length=100)
+    collected_at: datetime
+
+
+class RefundProcessIn(BaseModel):
+    reference: str | None = Field(default=None, min_length=2, max_length=100)
+
+
+class OrderStatusUpdateIn(OrderActionIn):
     status: str
-    note: str | None = None
+    note: str | None = Field(default=None, max_length=255)
 
 
 class OrderItemOut(BaseModel):
@@ -63,11 +126,14 @@ class OrderItemOut(BaseModel):
     quantity: int
     unit_price_paise: int
     unit_mrp_paise: int
-    unit_cost_paise: int
     gst_rate_percent: Decimal
     discount_paise: int
     tax_paise: int
     line_total_paise: int
+    image_url: str | None = None
+    product_slug: str | None = None
+    sku: str | None = None
+    variant_label: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -78,8 +144,48 @@ class OrderStatusHistoryOut(BaseModel):
     to_status: str
     note: str | None
     created_at: datetime
+    customer_visible_message: str | None = None
+    event_source: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def redact_private_note(cls, value):
+        if not isinstance(value, dict):
+            return {"id": value.id, "from_status": value.from_status, "to_status": value.to_status,
+                    "note": getattr(value, "customer_visible_message", None), "created_at": value.created_at,
+                    "customer_visible_message": getattr(value, "customer_visible_message", None),
+                    "event_source": getattr(value, "event_source", None)}
+        return value
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class AdminOrderStatusHistoryOut(OrderStatusHistoryOut):
+    changed_by: uuid.UUID | None = None
+    actor_type: str | None = None
+    reason: str | None = None
+    internal_admin_note: str | None = None
+    idempotency_key: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def redact_private_note(cls, value):
+        return value
+
+
+class ShipmentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    order_id: uuid.UUID
+    courier_name: str
+    tracking_number: str | None = None
+    tracking_url: str | None = None
+    shipment_reference: str | None = None
+    shipment_status: str
+    shipped_at: datetime | None = None
+    estimated_delivery_at: datetime | None = None
+    delivered_at: datetime | None = None
+    delivery_failure_reason: str | None = None
 
 
 class OrderPaymentOut(BaseModel):
@@ -87,9 +193,12 @@ class OrderPaymentOut(BaseModel):
     method: str
     provider: str | None
     provider_order_id: str | None
+    provider_payment_id: str | None = None
     status: str
     amount_paise: int
     paid_at: datetime | None
+    collection_method: str | None = None
+    collection_reference: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -121,11 +230,29 @@ class OrderOut(BaseModel):
     cancelled_at: datetime | None
     cancel_reason: str | None
     created_at: datetime
+    updated_at: datetime | None = None
+    version: int = 1
+    fulfillment_status: str | None = None
+    packed_at: datetime | None = None
+    shipped_at: datetime | None = None
+    out_for_delivery_at: datetime | None = None
+    amount_paid_paise: int = 0
+    outstanding_amount_paise: int = 0
+    customer_email: str | None = None
+    billing_address: dict | None = None
+    invoice_available: bool = False
+    invoice_number: str | None = None
+    allowed_actions: list[str] = Field(default_factory=list)
+    shipment: ShipmentOut | None = None
     items: list[OrderItemOut] = Field(default_factory=list)
     history: list[OrderStatusHistoryOut] = Field(default_factory=list)
     payments: list[OrderPaymentOut] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class AdminOrderOut(OrderOut):
+    history: list[AdminOrderStatusHistoryOut] = Field(default_factory=list)
 
 
 class PlaceOrderResponse(BaseModel):
@@ -138,4 +265,25 @@ class OrderListOut(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class AdminOrderListOut(OrderListOut):
+    items: list[AdminOrderOut]
+
+
+class OrderSummaryOut(BaseModel):
+    total_orders: int
+    new_orders: int
+    confirmed_orders: int
+    pending_packing: int
+    packed_orders: int
+    shipped_orders: int
+    out_for_delivery: int
+    delivered_orders: int
+    cancelled_orders: int
+    failed_deliveries: int
+    return_requests: int
+    pending_refunds: int
+    pending_cod_collection: int
+    pending_cod_amount_paise: int
 

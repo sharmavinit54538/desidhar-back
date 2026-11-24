@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Integer, DateTime, Enum, ForeignKey, Index, JSON
+from sqlalchemy import String, Integer, DateTime, Enum, ForeignKey, Index, JSON, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.db import Base
@@ -21,9 +21,15 @@ class Payment(Base):
     gateway_fee_paise: Mapped[int | None] = mapped_column(Integer, nullable=True)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     raw_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    collected_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    collection_method: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    collection_reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
     __table_args__ = (
         Index("ix_payments_order_id", "order_id"),
+        UniqueConstraint("order_id", "idempotency_key", name="uq_payments_order_idempotency"),
+        UniqueConstraint("provider", "provider_payment_id", name="uq_payments_provider_payment"),
     )
 

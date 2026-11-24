@@ -1,7 +1,7 @@
 import enum
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Boolean, Integer, DateTime, Enum, ForeignKey, Index, CheckConstraint
+from sqlalchemy import String, Boolean, Integer, DateTime, Enum, ForeignKey, Index, CheckConstraint, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.db import Base
@@ -26,6 +26,12 @@ class Refund(Base):
     reason: Mapped[RefundReason] = mapped_column(Enum(RefundReason, native_enum=False), nullable=False)
     notes: Mapped[str | None] = mapped_column(String(255), nullable=True)
     restock: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    idempotency_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    provider_refund_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
     issued_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
@@ -33,5 +39,6 @@ class Refund(Base):
     __table_args__ = (
         CheckConstraint("amount_paise > 0", name="ck_refunds_amount_positive"),
         Index("ix_refunds_order_issued", "order_id", "issued_at"),
+        UniqueConstraint("order_id", "idempotency_key", name="uq_refunds_order_idempotency"),
     )
 

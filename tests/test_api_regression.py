@@ -1,20 +1,12 @@
 import uuid
 import pytest
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy import select, delete
-from sqlalchemy.ext.asyncio import AsyncSession
+from httpx import AsyncClient
+from sqlalchemy import delete
 
-from app.main import app
-from app.core.db import async_session_maker
-from app.core.tokens import create_customer_token, create_admin_token
 from app.models.user import User, Role
 from app.models.address import Address
-
-
-@pytest.fixture
-async def client():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        yield ac
+from app.core.tokens import create_customer_token
+from tests.conftest import db_test_session_maker
 
 
 @pytest.mark.asyncio
@@ -68,8 +60,10 @@ async def test_payment_methods_api(client: AsyncClient):
 async def test_pincodes_api(client: AsyncClient):
     """Verify GET /delivery/check works."""
     res = await client.get("/delivery/check?pincode=500001")
-    # Pincode may or may not be seeded, but API must return valid status (200 or 404/serviceable=False)
-    assert res.status_code in (200, 404)
+    assert res.status_code == 200
+    data = res.json()
+    assert "serviceable" in data
+    assert data["pincode"] == "500001"
 
 
 @pytest.mark.asyncio
@@ -78,7 +72,7 @@ async def test_addresses_api_flow(client: AsyncClient):
     test_user_id = str(uuid.uuid4())
     test_email = f"addr-test-{uuid.uuid4().hex[:6]}@example.com"
 
-    async with async_session_maker() as session:
+    async with db_test_session_maker() as session:
         user = User(
             id=uuid.UUID(test_user_id),
             role=Role.customer,
@@ -128,7 +122,7 @@ async def test_addresses_api_flow(client: AsyncClient):
         assert after_del.status_code == 200
         assert len(after_del.json()) == 0
     finally:
-        async with async_session_maker() as session:
+        async with db_test_session_maker() as session:
             await session.execute(delete(Address).where(Address.user_id == uuid.UUID(test_user_id)))
             await session.execute(delete(User).where(User.id == uuid.UUID(test_user_id)))
             await session.commit()
@@ -141,4 +135,5 @@ async def test_cart_validate_api(client: AsyncClient):
     assert res.status_code == 200
     data = res.json()
     assert data["items"] == []
-    assert data["subtotal_paise"] == 0
+    assert data["subtotal"] == 0.0
+    assert data["valid"] is True

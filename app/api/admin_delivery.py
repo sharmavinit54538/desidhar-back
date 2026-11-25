@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +10,9 @@ from app.models.user import User, Role
 from app.models.order import Order, OrderStatus
 from app.models.delivery_management import DeliveryPartnerProfile, DeliveryAssignment, DeliveryAssignmentHistory
 from app.schemas.delivery_management import DeliveryPartnerCreateIn, DeliveryPartnerOut, DeliveryAssignmentIn, DeliveryAssignmentOut
+from app.models.delivery_finance import CashSettlement, CashSettlementItem
+from app.models.order_lifecycle import OrderNotification
+from app.schemas.delivery_finance import CashSettlementOut, CashSettlementReconcileIn, CashSettlementRejectIn
 
 router = APIRouter(prefix="/admin/delivery", tags=["admin-delivery"])
 
@@ -100,6 +104,10 @@ async def assign(order_id: uuid.UUID, data: DeliveryAssignmentIn, admin: User, d
         current.updated_at = func.now()
         db.add(DeliveryAssignmentHistory(assignment_id=current.id, order_id=order.id, actor_id=admin.id,
             from_status=old, to_status="cancelled", note="Reassigned by administrator"))
+        db.add(OrderNotification(order_id=order.id, user_id=current.partner_id, event_type="delivery_assignment",
+            event_key=f"assignment:{current.id}:cancelled:{current.version}", channel="in_app", recipient=None,
+            message=f"Delivery assignment for order {order.order_number} was cancelled",
+            payload={"assignment_id": str(current.id), "order_id": str(order.id), "status": "cancelled"}, status="queued"))
     elif reassign:
         raise HTTPException(status_code=409, detail="No active assignment to reassign")
     partner = (await db.execute(select(User).where(User.id == data.partner_id, User.role == Role.delivery_partner).with_for_update())).scalar_one_or_none()
@@ -119,6 +127,10 @@ async def assign(order_id: uuid.UUID, data: DeliveryAssignmentIn, admin: User, d
     await db.flush()
     db.add(DeliveryAssignmentHistory(assignment_id=assignment.id, order_id=order.id, actor_id=admin.id,
         from_status=None, to_status="assigned", note="Assigned by administrator"))
+    db.add(OrderNotification(order_id=order.id, user_id=partner.id, event_type="delivery_assignment",
+        event_key=f"assignment:{assignment.id}:assigned", channel="in_app", recipient=None,
+        message=f"New delivery assignment for order {order.order_number}",
+        payload={"assignment_id": str(assignment.id), "order_id": str(order.id), "status": "assigned"}, status="queued"))
     await db.flush()
     assignment.order_number = order.order_number
     assignment.fulfillment_status = order.status.value
@@ -143,3 +155,57 @@ async def assignment_history(order_id: uuid.UUID, db: AsyncSession = Depends(get
         row.order_number = order.order_number if order else None
         row.fulfillment_status = order.status.value if order else None
     return rows
+
+
+@router.get("/settlements", response_model=list[CashSettlementOut])
+async def list_settlements(db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)):
+    return list((await db.execute(select(CashSettlement).order_by(CashSettlement.submitted_at.desc()).limit(200))).scalars().all())
+
+
+@router.post("/settlements/{settlement_id}/reconcile", response_model=CashSettlementOut)
+async def reconcile_settlement(settlement_id: uuid.UUID, data: CashSettlementReconcileIn,
+    db: AsyncSession = Depends(get_db), admin: User = Depends(require_admin)):
+    settlement = (await db.execute(select(CashSettlement).where(CashSettlement.id == settlement_id).with_for_update())).scalar_one_or_none()
+    if not settlement:
+        raise HTTPException(status_code=404, detail="Cash settlement not found")
+    if settlement.status not in ("submitted", "discrepancy"):
+        raise HTTPException(status_code=409, detail=f"Settlement is already {settlement.status}")
+    settlement.verified_amount_paise = data.verified_amount_paise
+    settlement.deposit_reference = data.deposit_reference
+    settlement.review_note = data.note
+    settlement.reviewed_by = admin.id
+    settlement.reviewed_at = datetime.now(timezone.utc)
+    settlement.status = "approved" if data.verified_amount_paise == settlement.expected_amount_paise else "discrepancy"
+    await db.flush()
+    return settlement
+
+
+@router.post("/settlements/{settlement_id}/approve", response_model=CashSettlementOut)
+async def approve_settlement(settlement_id: uuid.UUID, db: AsyncSession = Depends(get_db), admin: User = Depends(require_admin)):
+    settlement = (await db.execute(select(CashSettlement).where(CashSettlement.id == settlement_id).with_for_update())).scalar_one_or_none()
+    if not settlement:
+        raise HTTPException(status_code=404, detail="Cash settlement not found")
+    if settlement.status != "approved" or settlement.verified_amount_paise != settlement.expected_amount_paise:
+        raise HTTPException(status_code=409, detail="Record and verify the full deposited amount before approval")
+    settlement.reviewed_by = admin.id
+    await db.flush()
+    return settlement
+
+
+@router.post("/settlements/{settlement_id}/reject", response_model=CashSettlementOut)
+async def reject_settlement(settlement_id: uuid.UUID, data: CashSettlementRejectIn,
+    db: AsyncSession = Depends(get_db), admin: User = Depends(require_admin)):
+    settlement = (await db.execute(select(CashSettlement).where(CashSettlement.id == settlement_id).with_for_update())).scalar_one_or_none()
+    if not settlement:
+        raise HTTPException(status_code=404, detail="Cash settlement not found")
+    if settlement.status not in ("submitted", "discrepancy"):
+        raise HTTPException(status_code=409, detail=f"Settlement is already {settlement.status}")
+    settlement.status = "rejected"
+    settlement.review_note = data.note
+    settlement.reviewed_by = admin.id
+    settlement.reviewed_at = datetime.now(timezone.utc)
+    # Rejected cash remains unsettled and may be included in a later submission.
+    from sqlalchemy import delete
+    await db.execute(delete(CashSettlementItem).where(CashSettlementItem.settlement_id == settlement.id))
+    await db.flush()
+    return settlement

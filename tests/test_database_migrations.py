@@ -22,7 +22,7 @@ def test_single_alembic_head():
     script = ScriptDirectory.from_config(alembic_cfg)
     heads = script.get_heads()
     assert len(heads) == 1, f"Expected exactly 1 Alembic head, got {len(heads)}: {heads}"
-    assert heads[0] == "ab18d190e4f2"
+    assert heads[0] == "ac8f2d2cb09a"
 
 
 def test_database_is_at_head():
@@ -32,7 +32,7 @@ def test_database_is_at_head():
     with engine.connect() as conn:
         context = MigrationContext.configure(conn)
         current_rev = context.get_current_revision()
-        assert current_rev == "ab18d190e4f2", f"Database is at {current_rev}, expected ab18d190e4f2"
+        assert current_rev == "ac8f2d2cb09a", f"Database is at {current_rev}, expected ac8f2d2cb09a"
 
 
 def test_schema_matches_orm_models():

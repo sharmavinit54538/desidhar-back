@@ -81,6 +81,7 @@ class DeliveryOrderOut(BaseModel):
     total_paise: int
     amount_paid_paise: int
     outstanding_amount_paise: int
+    version: int
     created_at: datetime
     items: list[OrderItemOut]
     assignment: DeliveryAssignmentOut

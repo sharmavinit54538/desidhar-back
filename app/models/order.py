@@ -1,7 +1,7 @@
 import enum
 import uuid
-from datetime import datetime, timezone
-from sqlalchemy import String, Integer, Text, DateTime, Enum, ForeignKey, CheckConstraint, Index, UniqueConstraint, Boolean, JSON
+from datetime import date, datetime, timezone
+from sqlalchemy import String, Integer, Text, DateTime, Enum, ForeignKey, CheckConstraint, Index, UniqueConstraint, Boolean, JSON, Date
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.db import Base
@@ -78,6 +78,11 @@ class Order(Base):
     shipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     out_for_delivery_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    estimated_delivery_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    estimated_delivery_end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    revised_delivery_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    delay_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    delivery_speed: Mapped[str] = mapped_column(String(20), default="standard", server_default="standard", nullable=False)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancel_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
 

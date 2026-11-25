@@ -1,17 +1,20 @@
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, Header, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Header, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db, get_current_user
 from app.models.user import User
 from app.models.order import PaymentMethod
-from app.schemas.order import OrderCreateIn, OrderOut, OrderListOut, CancelOrderIn, PlaceOrderResponse, CustomerReturnIn
+from app.schemas.order import OrderCreateIn, OrderOut, OrderListOut, CancelOrderIn, PlaceOrderResponse, CustomerReturnIn, OrderTrackingOut
 from app.services.order_service import (
-    place_order, get_user_order, list_user_orders, transition_order_status,
+    place_order, get_order_by_idempotency, get_user_order, list_user_orders, transition_order_status,
 )
 from app.services.payment_service import initiate_payment
 
 from app.models.cart_item import CartItem
+from app.models.payment import Payment
 from app.services.cart_service import get_or_create_cart
+from app.services.email_service import send_order_email
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -19,23 +22,55 @@ router = APIRouter(prefix="/orders", tags=["orders"])
 @router.post("", response_model=PlaceOrderResponse, status_code=status.HTTP_201_CREATED)
 async def create_order(
     data: OrderCreateIn,
+    background_tasks: BackgroundTasks,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     key = (idempotency_key or str(uuid.uuid4())).strip()
+
+    # Serialize order submissions before touching the cart. A retry after a
+    # successful checkout must return that order without restoring its items.
+    await db.execute(select(User.id).where(User.id == user.id).with_for_update())
+    existing_order = await get_order_by_idempotency(db, user.id, key)
+    if existing_order:
+        payment_url = None
+        if existing_order.payment_method == PaymentMethod.online:
+            payment = await db.scalar(select(Payment).where(Payment.order_id == existing_order.id))
+            if payment and payment.provider_order_id:
+                payment_url = f"/payments/checkout?order_id={existing_order.id}&provider_order_id={payment.provider_order_id}"
+            elif payment and payment.status.value != "paid":
+                payment_data = await initiate_payment(db, existing_order)
+                payment_url = f"/payments/checkout?order_id={existing_order.id}&provider_order_id={payment_data['provider_order_id']}"
+        return PlaceOrderResponse(order=existing_order, payment_url=payment_url)
+
     if data.items:
         cart = await get_or_create_cart(db, user.id)
-        # Update the loaded relationship collection so checkout cannot see stale
-        # cart items from the identity map after a bulk DELETE.
-        cart.items.clear()
+        requested: dict[uuid.UUID, int] = {}
         for it in data.items:
-            cart.items.append(CartItem(product_id=it.product_id, quantity=it.quantity))
+            requested[it.product_id] = requested.get(it.product_id, 0) + it.quantity
+
+        existing_items = {item.product_id: item for item in cart.items}
+        for product_id, item in existing_items.items():
+            quantity = requested.pop(product_id, None)
+            if quantity is None:
+                cart.items.remove(item)
+            else:
+                item.quantity = quantity
+        for product_id, quantity in requested.items():
+            cart.items.append(CartItem(product_id=product_id, quantity=quantity))
         await db.flush()
 
-    order, err = await place_order(db, user, data.address_id, data.payment_method, key, data.coupon_code, data.notes)
+    order, err = await place_order(db, user, data.address_id, data.payment_method, key, data.coupon_code, data.notes, data.delivery_speed)
     if err or not order:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=err or "Could not place order")
+
+    if order.customer_email:
+        eta = order.estimated_delivery_date.isoformat() if order.estimated_delivery_date else "to be confirmed"
+        eta_end = f" to {order.estimated_delivery_end_date.isoformat()}" if order.estimated_delivery_end_date else ""
+        background_tasks.add_task(send_order_email, order.customer_email,
+                                  f"Order {order.order_number} confirmed",
+                                  f"Thank you for your order {order.order_number}. Expected delivery: {eta}{eta_end}. Track your order in My Orders.")
 
     payment_url = None
     if order.payment_method == PaymentMethod.online:
@@ -63,6 +98,25 @@ async def get_order(order_id: uuid.UUID, db: AsyncSession = Depends(get_db), use
     if not order:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
     return order
+
+
+@router.get("/{order_id}/tracking", response_model=OrderTrackingOut)
+async def track_order(order_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    order = await get_user_order(db, user.id, order_id)
+    if not order:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+    shipment = order.shipment
+    return OrderTrackingOut(
+        order_id=order.id, order_number=order.order_number, status=order.status.value,
+        delivery_status=order.delivery_status, order_date=order.placed_at or order.created_at,
+        estimated_delivery_date=order.estimated_delivery_date,
+        estimated_delivery_end_date=order.estimated_delivery_end_date,
+        revised_delivery_date=order.revised_delivery_date, actual_delivery_date=order.delivered_at,
+        delay_reason=order.delay_reason, shipping_pincode=order.shipping_pincode,
+        courier_name=shipment.courier_name if shipment else None,
+        tracking_id=shipment.tracking_number if shipment else None,
+        tracking_url=shipment.tracking_url if shipment else None, timeline=order.history,
+    )
 
 
 @router.post("/{order_id}/cancel", response_model=OrderOut)

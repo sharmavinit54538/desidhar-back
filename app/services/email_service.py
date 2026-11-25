@@ -63,3 +63,27 @@ async def send_delivery_otp_email(email: str, otp: str, order_number: str) -> No
     except Exception as e:
         logger.error("Failed to send delivery verification email: %s", type(e).__name__)
         raise
+
+
+async def send_order_email(email: str, subject: str, body: str) -> None:
+    """Send customer order lifecycle email using the configured SMTP transport."""
+    if not settings.smtp_configured:
+        raise RuntimeError("SMTP is not configured")
+    msg = MIMEMultipart()
+    msg["From"] = settings.SMTP_FROM
+    msg["To"] = email
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "plain"))
+    try:
+        if settings.SMTP_TLS:
+            with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
+                server.starttls()
+                server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT) as server:
+                server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+                server.send_message(msg)
+    except Exception as e:
+        logger.error("Failed to send order lifecycle email: %s", type(e).__name__)
+        raise

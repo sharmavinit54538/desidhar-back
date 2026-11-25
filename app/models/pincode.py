@@ -14,6 +14,7 @@ class Pincode(Base):
     area_name: Mapped[str] = mapped_column(String(200), nullable=False)
     city: Mapped[str] = mapped_column(String(100), nullable=False)
     state: Mapped[str] = mapped_column(String(100), nullable=False)
+    shipping_zone: Mapped[str | None] = mapped_column(String(100), nullable=True)
     is_serviceable: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     delivery_fee_paise: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     free_delivery_above_paise: Mapped[int | None] = mapped_column(Integer, nullable=True)

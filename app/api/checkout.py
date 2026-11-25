@@ -8,6 +8,7 @@ from app.models.cart_item import CartItem
 from app.schemas.checkout import CheckoutPreviewIn, CheckoutPreviewOut
 from app.services.checkout_service import evaluate_checkout
 from app.services.cart_service import get_or_create_cart
+from app.services.delivery_estimate_service import estimate_delivery
 
 router = APIRouter(prefix="/checkout", tags=["checkout"])
 
@@ -29,6 +30,9 @@ async def preview(data: CheckoutPreviewIn, db: AsyncSession = Depends(get_db), u
         await db.flush()
 
     res = await evaluate_checkout(db, user.id, data.address_id, data.coupon_code, data.payment_method)
+    estimate = None
+    if res.pincode and res.items:
+        estimate = await estimate_delivery(db, res.pincode, [it["product_id"] for it in res.items], data.delivery_speed)
     subtotal_rupees = round(float(res.subtotal_paise or 0) / 100.0, 2)
     delivery_fee_rupees = round(float(res.delivery_fee_paise or 0) / 100.0, 2)
     discount_rupees = round(float(res.discount_paise or 0) / 100.0, 2)
@@ -36,6 +40,9 @@ async def preview(data: CheckoutPreviewIn, db: AsyncSession = Depends(get_db), u
     free_above_rupees = round(float(getattr(res, "free_delivery_above_paise", 0) or 0) / 100.0, 2)
     min_order_rupees = round(float(getattr(res, "min_order_paise", 0) or 0) / 100.0, 2)
 
+    blocking_reasons = list(res.blocking_reasons)
+    if data.delivery_speed == "express" and estimate and not estimate.serviceable:
+        blocking_reasons.append(estimate.message)
     return CheckoutPreviewOut(
         address_id=data.address_id,
         pincode=res.pincode,
@@ -54,6 +61,9 @@ async def preview(data: CheckoutPreviewIn, db: AsyncSession = Depends(get_db), u
         total_paise=res.total_paise,
         total_tax_paise=res.total_tax_paise,
         cod_available=res.cod_available,
-        can_checkout=res.can_checkout,
-        blocking_reasons=res.blocking_reasons,
+        can_checkout=res.can_checkout and not (data.delivery_speed == "express" and estimate and not estimate.serviceable),
+        blocking_reasons=blocking_reasons,
+        estimated_delivery_date=estimate.estimated_delivery_date if estimate and estimate.serviceable else None,
+        estimated_delivery_end_date=estimate.estimated_delivery_end_date if estimate and estimate.serviceable else None,
+        delivery_speed=data.delivery_speed,
     )

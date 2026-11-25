@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 import uuid
 
 
@@ -9,14 +9,6 @@ class DeliveryCashCollectionIn(BaseModel):
     idempotency_key: str = Field(min_length=8, max_length=100)
     amount_paise: int = Field(gt=0)
     method: str = Field(pattern="^cash$")
-    collected_at: datetime
-
-    @field_validator("collected_at")
-    @classmethod
-    def aware_time(cls, value):
-        if value.tzinfo is None:
-            raise ValueError("Timestamp must include a timezone")
-        return value
 
 
 class DeliveryOTPVerifyIn(BaseModel):

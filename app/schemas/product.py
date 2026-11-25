@@ -31,6 +31,7 @@ class ProductCreate(BaseModel):
     gst_rate_percent: Decimal = Field(default=Decimal("0.00"), ge=0, le=100)
     max_qty_per_order: int = Field(default=10, gt=0)
     shelf_life_days: int | None = Field(default=None, ge=1)
+    processing_days: int = Field(default=1, ge=0, le=60)
     is_veg: bool = True
     is_active: bool = True
     images: list[ImageIn] = Field(default_factory=list)
@@ -60,6 +61,7 @@ class ProductUpdate(BaseModel):
     gst_rate_percent: Decimal | None = Field(default=None, ge=0, le=100)
     max_qty_per_order: int | None = Field(default=None, gt=0)
     shelf_life_days: int | None = Field(default=None, ge=1)
+    processing_days: int | None = Field(default=None, ge=0, le=60)
     is_veg: bool | None = None
     is_active: bool | None = None
     images: list[ImageIn] | None = None
@@ -93,6 +95,7 @@ class ProductOut(BaseModel):
     pack_size: Decimal
     stock_qty: int
     shelf_life_days: int | None
+    processing_days: int = 1
     is_veg: bool
     is_active: bool
     images: list[ImageOut]

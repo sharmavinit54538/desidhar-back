@@ -35,6 +35,7 @@ class Product(Base):
     pack_size: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     stock_qty: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     shelf_life_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    processing_days: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
     is_veg: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     delivery_mode: Mapped[DeliveryMode] = mapped_column(Enum(DeliveryMode, native_enum=False), default=DeliveryMode.all, server_default="all", nullable=False)
     cost_price_paise: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
@@ -52,6 +53,7 @@ class Product(Base):
         CheckConstraint("mrp_paise >= 0", name="ck_mrp_paise_non_negative"),
         CheckConstraint("price_paise <= mrp_paise", name="ck_price_lte_mrp"),
         CheckConstraint("stock_qty >= 0", name="ck_stock_qty_non_negative"),
+        CheckConstraint("processing_days >= 0", name="ck_product_processing_days_non_negative"),
         CheckConstraint("cost_price_paise >= 0", name="ck_cost_price_paise_non_negative"),
         CheckConstraint("gst_rate_percent >= 0 AND gst_rate_percent <= 100", name="ck_gst_rate_percent_range"),
         CheckConstraint("max_qty_per_order > 0", name="ck_max_qty_per_order_positive"),

@@ -1,6 +1,6 @@
 import uuid
 from decimal import Decimal
-from datetime import datetime
+from datetime import date, datetime
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 from typing import Literal
 
@@ -24,6 +24,7 @@ class OrderCreateIn(BaseModel):
     items: list[OrderItemIn] = Field(default_factory=list)
     coupon_code: str | None = None
     notes: str | None = None
+    delivery_speed: str = Field(default="standard", pattern="^(standard|express)$")
 
     @field_validator("address_id", mode="before")
     @classmethod
@@ -59,6 +60,13 @@ class ShipmentIn(BaseModel):
     tracking_url: str | None = Field(default=None, max_length=1000)
     shipment_reference: str | None = Field(default=None, max_length=100)
     shipped_at: datetime | None = None
+    estimated_delivery_date: date | None = None
+    estimated_delivery_end_date: date | None = None
+    revised_delivery_date: date | None = None
+    actual_delivery_date: datetime | None = None
+    delivery_status: str | None = None
+    delivery_speed: str = "standard"
+    delay_reason: str | None = None
     estimated_delivery_at: datetime | None = None
 
     @field_validator("tracking_url")
@@ -124,6 +132,27 @@ class OrderStatusUpdateIn(OrderActionIn):
             s = v.strip().lower()
             return s
         return str(v)
+
+
+class DeliveryDetailsUpdateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    estimated_delivery_date: date | None = None
+    estimated_delivery_end_date: date | None = None
+    revised_delivery_date: date | None = None
+    delay_reason: str | None = Field(default=None, min_length=2, max_length=500)
+    courier_name: str | None = Field(default=None, min_length=2, max_length=100)
+    tracking_number: str | None = Field(default=None, max_length=150)
+    tracking_url: str | None = Field(default=None, max_length=2048)
+
+    @field_validator("tracking_url")
+    @classmethod
+    def valid_tracking_url(cls, value):
+        if value:
+            from urllib.parse import urlsplit
+            parsed = urlsplit(value)
+            if parsed.scheme not in ("https", "http") or not parsed.hostname or parsed.username or parsed.password:
+                raise ValueError("Tracking URL must be an HTTP(S) URL without credentials")
+        return value
 
 
 class OrderItemOut(BaseModel):
@@ -267,6 +296,24 @@ class AdminOrderOut(OrderOut):
 class PlaceOrderResponse(BaseModel):
     order: OrderOut
     payment_url: str | None = None
+
+
+class OrderTrackingOut(BaseModel):
+    order_id: uuid.UUID
+    order_number: str
+    status: str
+    delivery_status: str
+    order_date: datetime
+    estimated_delivery_date: date | None = None
+    estimated_delivery_end_date: date | None = None
+    revised_delivery_date: date | None = None
+    actual_delivery_date: datetime | None = None
+    delay_reason: str | None = None
+    shipping_pincode: str
+    courier_name: str | None = None
+    tracking_id: str | None = None
+    tracking_url: str | None = None
+    timeline: list[OrderStatusHistoryOut] = Field(default_factory=list)
 
 
 class OrderListOut(BaseModel):

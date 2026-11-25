@@ -149,6 +149,8 @@ async def update_assignment(order_id: uuid.UUID, data: DeliveryActionIn, partner
         "failed": ("in_progress", "failed"),
     }
     expected, target = transitions[action]
+    if action == "failed" and not data.note:
+        raise HTTPException(status_code=422, detail="Provide a delivery failure reason")
     if assignment.status != expected:
         raise HTTPException(status_code=409, detail=f"Cannot {action} assignment in '{assignment.status}' state")
     now = datetime.now(timezone.utc)
@@ -238,23 +240,24 @@ async def collect_cod_cash(order_id: uuid.UUID, data: DeliveryCashCollectionIn,
     outstanding = order.outstanding_paise
     if data.amount_paise != outstanding:
         raise HTTPException(status_code=422, detail=f"Collect the exact outstanding amount of {outstanding} paise")
+    now = datetime.now(timezone.utc)
     payment = next((p for p in order.payments if p.method == PaymentMethod.cod and p.paid_at is None), None)
     if payment is None:
         raise HTTPException(status_code=409, detail="No pending COD payment record exists for this order")
     payment.status = PaymentStatus.paid
-    payment.paid_at = data.collected_at
+    payment.paid_at = now
     payment.collected_by = partner.id
     payment.collection_method = "cash"
     payment.collection_reference = data.idempotency_key
     payment.idempotency_key = data.idempotency_key
     order.payment_status = PaymentStatus.paid
     order.version += 1
-    order.updated_at = datetime.now(timezone.utc)
+    order.updated_at = now
     assignment.version += 1
-    assignment.updated_at = datetime.now(timezone.utc)
+    assignment.updated_at = now
     collection = CODCollection(order_id=order.id, payment_id=payment.id, partner_id=partner.id,
         amount_paise=data.amount_paise, method="cash", idempotency_key=data.idempotency_key,
-        collected_at=data.collected_at)
+        collected_at=now)
     db.add(collection)
     await db.flush()
     db.add(OrderNotification(order_id=order.id, user_id=order.user_id, event_type="payment_confirmed",

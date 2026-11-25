@@ -8,6 +8,7 @@ class PincodeBase(BaseModel):
     area_name: str = Field(..., min_length=1, max_length=200)
     city: str = Field(..., min_length=1, max_length=100)
     state: str = Field(..., min_length=1, max_length=100)
+    shipping_zone: str | None = Field(default=None, max_length=100)
     is_serviceable: bool = True
     delivery_fee_paise: int = Field(default=0, ge=0)
     free_delivery_above_paise: int | None = Field(default=None, ge=0)
@@ -30,6 +31,7 @@ class PincodeUpdate(BaseModel):
     area_name: str | None = Field(default=None, min_length=1, max_length=200)
     city: str | None = Field(default=None, min_length=1, max_length=100)
     state: str | None = Field(default=None, min_length=1, max_length=100)
+    shipping_zone: str | None = Field(default=None, max_length=100)
     is_serviceable: bool | None = None
     delivery_fee_paise: int | None = Field(default=None, ge=0)
     free_delivery_above_paise: int | None = Field(default=None, ge=0)
@@ -53,6 +55,7 @@ class PincodeOut(BaseModel):
     area_name: str
     city: str
     state: str
+    shipping_zone: str | None = None
     is_serviceable: bool
     delivery_fee_paise: int
     free_delivery_above_paise: int | None

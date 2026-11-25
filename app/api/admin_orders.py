@@ -1,15 +1,21 @@
 import uuid
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db, require_admin
 from app.models.user import User
 from app.models.order import Order, OrderStatus, PaymentMethod, PaymentStatus
-from app.schemas.order import OrderOut, OrderListOut, OrderStatusUpdateIn, OrderSummaryOut
+from app.models.delivery_management import DeliveryAssignment
+from app.models.delivery_finance import DeliveryOTP
+from app.schemas.order import OrderOut, OrderListOut, OrderStatusUpdateIn, OrderSummaryOut, DeliveryDetailsUpdateIn
 from app.schemas.refund import RefundCreateIn, RefundOut
 from app.services.order_service import admin_list_orders, transition_order_status
 from app.services.refund_service import create_refund, list_order_refunds
 from app.services.payment_service import cancel_expired_unpaid_orders
+from app.models.order_lifecycle import Shipment, OrderNotification
+from app.services.email_service import send_order_email
+from fastapi import BackgroundTasks
 
 router = APIRouter(prefix="/admin/orders", tags=["admin-orders"])
 
@@ -72,9 +78,61 @@ async def change_status(
     order = (await db.execute(select(Order).where(Order.id == order_id))).scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+    if data.status == OrderStatus.delivered.value:
+        active_assignment = (await db.execute(select(DeliveryAssignment).where(
+            DeliveryAssignment.order_id == order_id,
+            DeliveryAssignment.status.in_(("assigned", "accepted", "picked_up", "in_progress"))
+        ))).scalar_one_or_none()
+        if active_assignment:
+            verified_otp = await db.scalar(select(DeliveryOTP.id).where(
+                DeliveryOTP.order_id == order_id, DeliveryOTP.assignment_id == active_assignment.id,
+                DeliveryOTP.used_at.is_not(None)).limit(1))
+            if not verified_otp:
+                raise HTTPException(status_code=409, detail="An assigned delivery can only be completed after the delivery partner verifies the customer OTP")
+            if order.payment_status != PaymentStatus.paid:
+                raise HTTPException(status_code=409, detail="Payment must be verified before completing delivery")
     ok, err = await transition_order_status(db, order, data.status, changed_by=admin.id, note=data.note, is_admin=True, expected_version=data.expected_version)
     if not ok:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=err)
+    return order
+
+
+@router.patch("/{order_id}/delivery", response_model=OrderOut)
+async def update_delivery_details(
+    order_id: uuid.UUID, data: DeliveryDetailsUpdateIn, background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db), admin: User = Depends(require_admin),
+):
+    order = (await db.execute(select(Order).where(Order.id == order_id).with_for_update())).scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    fields = data.model_fields_set
+    for name in ("estimated_delivery_date", "estimated_delivery_end_date", "revised_delivery_date", "delay_reason"):
+        if name in fields:
+            setattr(order, name, getattr(data, name))
+    if "courier_name" in fields or "tracking_number" in fields or "tracking_url" in fields:
+        shipment = order.shipment
+        if shipment is None:
+            shipment = Shipment(order_id=order.id, courier_name=data.courier_name or "Courier pending",
+                                shipment_reference=order.order_number, shipment_status=order.status.value,
+                                shipped_at=order.shipped_at or datetime.now(timezone.utc))
+            db.add(shipment)
+        if data.courier_name is not None:
+            shipment.courier_name = data.courier_name
+        if "tracking_number" in fields:
+            shipment.tracking_number = data.tracking_number
+        if "tracking_url" in fields:
+            shipment.tracking_url = data.tracking_url
+    revised = data.revised_delivery_date
+    original = order.estimated_delivery_date
+    if revised and original and revised > original and data.delay_reason and order.customer_email:
+        message = f"Your order {order.order_number} is delayed. Revised expected delivery: {revised.isoformat()}. Reason: {data.delay_reason}. Track your order in My Orders."
+        event_key = f"delivery-delay:{revised.isoformat()}"
+        db.add(OrderNotification(order_id=order.id, user_id=order.user_id, event_type="delivery_delay",
+                                 event_key=event_key, channel="email", recipient=order.customer_email,
+                                 message=message, payload={"revised_delivery_date": revised.isoformat(), "reason": data.delay_reason}, status="queued"))
+        background_tasks.add_task(send_order_email, order.customer_email, f"Delivery update for {order.order_number}", message)
+    await db.flush()
+    await db.refresh(order)
     return order
 
 

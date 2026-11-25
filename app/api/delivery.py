@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db
-from app.schemas.delivery import DeliveryCheckOut, ProductDeliveryCheckOut
+from app.schemas.delivery import DeliveryCheckOut, ProductDeliveryCheckOut, DeliveryEstimateIn, DeliveryEstimateOut
 from app.services.pincode_service import get_pincode_by_code
 from app.services.delivery_service import check_deliverable
 from app.services.product_service import get_product_by_slug
+from app.services.delivery_estimate_service import estimate_delivery
 
 router = APIRouter(tags=["delivery"])
 
@@ -53,7 +54,13 @@ async def check_pincode_query(
     db: AsyncSession = Depends(get_db),
 ):
     p = await get_pincode_by_code(db, pincode)
-    return format_delivery_response(p, pincode)
+    response = format_delivery_response(p, pincode)
+    estimate = await estimate_delivery(db, pincode, []) if p and p.is_serviceable else None
+    if estimate and estimate.serviceable:
+        response.estimated_delivery_date = estimate.estimated_delivery_date
+        response.estimated_delivery_end_date = estimate.estimated_delivery_end_date
+        response.estimated_delivery = (estimate.estimated_delivery_date.isoformat() if estimate.estimated_delivery_date else "")
+    return response
 
 
 @router.get("/pincodes/check/{pincode}", response_model=DeliveryCheckOut)
@@ -64,7 +71,13 @@ async def check_pincode_path(
     if not pincode.isdigit() or len(pincode) != 6 or pincode.startswith("0"):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid 6-digit pincode")
     p = await get_pincode_by_code(db, pincode)
-    return format_delivery_response(p, pincode)
+    response = format_delivery_response(p, pincode)
+    estimate = await estimate_delivery(db, pincode, []) if p and p.is_serviceable else None
+    if estimate and estimate.serviceable:
+        response.estimated_delivery_date = estimate.estimated_delivery_date
+        response.estimated_delivery_end_date = estimate.estimated_delivery_end_date
+        response.estimated_delivery = estimate.estimated_delivery_date.isoformat() if estimate.estimated_delivery_date else ""
+    return response
 
 
 @router.get("/products/{slug}/delivery", response_model=ProductDeliveryCheckOut)
@@ -78,4 +91,21 @@ async def check_product_delivery(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
     chk = await check_deliverable(db, pincode=pincode, product_ids=[prod.id])
     deliv, reason = chk.results.get(prod.id, (False, "Product not available in this area"))
-    return ProductDeliveryCheckOut(product_id=prod.id, slug=prod.slug, pincode=pincode, deliverable=deliv, reason=reason)
+    estimate = await estimate_delivery(db, pincode, [prod.id]) if deliv else None
+    return ProductDeliveryCheckOut(product_id=prod.id, slug=prod.slug, pincode=pincode, deliverable=deliv,
+                                   reason=reason if not deliv else (estimate.message if estimate and not estimate.serviceable else None),
+                                   estimated_delivery_date=estimate.estimated_delivery_date if estimate and estimate.serviceable else None,
+                                   estimated_delivery_end_date=estimate.estimated_delivery_end_date if estimate and estimate.serviceable else None)
+
+
+@router.post("/delivery/estimate", response_model=DeliveryEstimateOut)
+async def estimate_delivery_query(data: DeliveryEstimateIn, db: AsyncSession = Depends(get_db)):
+    result = await estimate_delivery(db, data.pincode, data.product_ids, data.delivery_speed)
+    if data.product_ids:
+        availability = await check_deliverable(db, data.pincode, data.product_ids)
+        if not availability.pincode_serviceable or any(not allowed for allowed, _ in availability.results.values()):
+            result.serviceable = False
+            result.estimated_delivery_date = None
+            result.estimated_delivery_end_date = None
+            result.message = "One or more products cannot be delivered to this PIN code."
+    return result

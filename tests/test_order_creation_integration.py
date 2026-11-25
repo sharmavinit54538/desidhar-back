@@ -7,7 +7,7 @@ import uuid
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.models.address import Address
 from app.models.cart import Cart
@@ -108,16 +108,31 @@ async def test_post_orders_returns_saved_order_without_schema_error(db_session):
     if not admin_user:
         pytest.skip("Configured PostgreSQL database has no admin fixture")
 
+    # Reproduce the checkout failure from a cart that already contains the
+    # product also sent in the order payload.
+    cart = await db_session.scalar(select(Cart).where(Cart.user_id == user.id))
+    if cart is None:
+        cart = Cart(user_id=user.id)
+        db_session.add(cart)
+        await db_session.flush()
+    existing_item = next((item for item in cart.items if item.product_id == product.id), None)
+    if existing_item:
+        existing_item.quantity = 1
+    else:
+        cart.items.append(CartItem(product_id=product.id, quantity=1))
+    await db_session.flush()
+
     async def rollback_session():
         yield db_session
 
     original = app.dependency_overrides.get(get_db)
     app.dependency_overrides[get_db] = rollback_session
     try:
+        checkout_key = f"api-test-{uuid.uuid4()}"
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/orders",
-                headers={"Authorization": f"Bearer {create_customer_token(str(user.id))}", "Idempotency-Key": f"api-test-{uuid.uuid4()}"},
+                headers={"Authorization": f"Bearer {create_customer_token(str(user.id))}", "Idempotency-Key": checkout_key},
                 json={"address_id": str(address.id), "payment_method": "cod",
                       "items": [{"product_id": str(product.id), "quantity": 1}]},
             )
@@ -134,6 +149,19 @@ async def test_post_orders_returns_saved_order_without_schema_error(db_session):
         admin_headers = {"Authorization": f"Bearer {create_admin_token(str(admin_user.id))}"}
         expected_version = payload["order"]["version"]
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as workflow_client:
+            retry = await workflow_client.post(
+                "/orders",
+                headers={"Authorization": f"Bearer {create_customer_token(str(user.id))}", "Idempotency-Key": checkout_key},
+                json={"address_id": str(address.id), "payment_method": "cod",
+                      "items": [{"product_id": str(product.id), "quantity": 1}]},
+            )
+            assert retry.status_code == 201, retry.text
+            assert retry.json()["order"]["id"] == order_id
+            remaining_cart_items = await db_session.scalar(
+                select(func.count()).select_from(CartItem).where(CartItem.cart_id == cart.id)
+            )
+            assert remaining_cart_items == 0
+
             for stage, next_stage in [
                 ("confirmed", "packed"),
                 ("packed", "shipped"),

@@ -1,4 +1,5 @@
 import uuid
+from datetime import date
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -7,6 +8,7 @@ class CheckoutPreviewIn(BaseModel):
     coupon_code: str | None = None
     payment_method: str | None = Field(default=None)
     items: list[dict] = Field(default_factory=list)
+    delivery_speed: str = Field(default="standard", pattern="^(standard|express)$")
 
     @field_validator("address_id", mode="before")
     @classmethod
@@ -64,3 +66,6 @@ class CheckoutPreviewOut(BaseModel):
     cod_available: bool = False
     can_checkout: bool = False
     blocking_reasons: list[str] = Field(default_factory=list)
+    estimated_delivery_date: date | None = None
+    estimated_delivery_end_date: date | None = None
+    delivery_speed: str = "standard"

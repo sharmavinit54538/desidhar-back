@@ -87,6 +87,10 @@ async def test_admin_partner_cod_otp_and_settlement_workflow(db_session, monkeyp
             json={"partner_id": partner_id})
         assert assigned.status_code == 201, assigned.text
         assert assigned.json()["status"] == "assigned"
+        bypass = await client.post(f"/admin/orders/{order.id}/status", headers=admin_headers,
+            json={"status": "delivered", "expected_version": order_version})
+        assert bypass.status_code == 409
+        assert "customer otp" in bypass.json()["detail"].lower()
         second = await client.post(f"/admin/delivery/orders/{order.id}/assign", headers=admin_headers,
             json={"partner_id": partner_id})
         assert second.status_code == 409
@@ -114,7 +118,7 @@ async def test_admin_partner_cod_otp_and_settlement_workflow(db_session, monkeyp
             "expected_order_version": detail_payload["version"],
             "expected_assignment_version": detail_payload["assignment"]["version"],
             "idempotency_key": collection_key, "amount_paise": detail_payload["outstanding_amount_paise"],
-            "method": "cash", "collected_at": "2026-11-25T10:00:00+00:00",
+            "method": "cash",
         })
         assert collected.status_code == 200, collected.text
         assert collected.json()["payment_status"] == "paid"
@@ -122,7 +126,7 @@ async def test_admin_partner_cod_otp_and_settlement_workflow(db_session, monkeyp
             "expected_order_version": detail_payload["version"],
             "expected_assignment_version": detail_payload["assignment"]["version"],
             "idempotency_key": collection_key, "amount_paise": detail_payload["outstanding_amount_paise"],
-            "method": "cash", "collected_at": "2026-11-25T10:00:00+00:00",
+            "method": "cash",
         })
         assert duplicate.status_code == 200, duplicate.text
 

@@ -5,6 +5,7 @@ from app.models.product import Product, UnitEnum
 from app.models.product_image import ProductImage
 from app.models.delivery_mode import DeliveryMode
 from app.models.pincode import Pincode
+from app.models.shipping_rule import ShippingRule
 from app.models.product_pincode import ProductPincode
 from app.models.address import Address
 from app.models.cart import Cart
@@ -24,7 +25,7 @@ from app.models.delivery_finance import CODCollection, CashSettlement, CashSettl
 
 __all__ = [
     "User", "Role", "OTPCode", "Category", "Product", "UnitEnum",
-    "ProductImage", "DeliveryMode", "Pincode", "ProductPincode",
+    "ProductImage", "DeliveryMode", "Pincode", "ShippingRule", "ProductPincode",
     "Address", "Cart", "CartItem", "Coupon", "CouponType", "CouponRedemption",
     "Order", "OrderStatus", "PaymentMethod", "PaymentStatus",
     "OrderItem", "OrderStatusHistory", "Payment", "Refund", "RefundReason",

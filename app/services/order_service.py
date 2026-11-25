@@ -13,6 +13,7 @@ from app.services.stock_service import reserve_stock, release_stock
 from app.services.order_transition import can_transition
 from app.services.cart_service import clear_cart
 from app.models.order_lifecycle import OrderNotification, OrderAuditLog
+from app.services.delivery_estimate_service import estimate_delivery
 
 
 async def generate_order_number(session: AsyncSession) -> str:
@@ -30,6 +31,7 @@ async def get_order_by_idempotency(session: AsyncSession, user_id: uuid.UUID, ke
 async def place_order(
     session: AsyncSession, user: User, address_id: uuid.UUID,
     method: str, idem_key: str, coupon_code: str | None = None, notes: str | None = None,
+    delivery_speed: str = "standard",
 ) -> tuple[Order | None, str | None]:
     # Serialize checkout attempts per customer so the idempotency lookup and stock
     # reservation cannot race into duplicate orders.
@@ -52,6 +54,10 @@ async def place_order(
     init_status = OrderStatus.placed if method == PaymentMethod.cod.value else OrderStatus.payment_pending
     placed_at = now if init_status == OrderStatus.placed else None
 
+    estimate = await estimate_delivery(session, chk.pincode, [it["product_id"] for it in chk.items], delivery_speed)
+    if not estimate.serviceable:
+        await release_stock(session, items_to_reserve)
+        return None, estimate.message
     order = Order(
         order_number=ord_num, user_id=user.id, status=init_status,
         payment_method=PaymentMethod(method), payment_status=PaymentStatus.pending,
@@ -62,7 +68,9 @@ async def place_order(
         subtotal_paise=chk.subtotal_paise, discount_paise=chk.discount_paise,
         coupon_code=chk.coupon_code, delivery_fee_paise=chk.delivery_fee_paise,
         total_paise=chk.total_paise, tax_paise=chk.total_tax_paise, notes=notes, items=[], history=[],
-        idempotency_key=idem_key, placed_at=placed_at,
+        idempotency_key=idem_key, placed_at=placed_at, delivery_speed=delivery_speed,
+        estimated_delivery_date=estimate.estimated_delivery_date,
+        estimated_delivery_end_date=estimate.estimated_delivery_end_date,
     )
     session.add(order)
     await session.flush()
@@ -89,6 +97,17 @@ async def place_order(
                                   event_key=f"status:1:{init_status.value}", channel="in_app", recipient=None,
                                   message=f"Order {init_status.value.replace('_', ' ')}", payload={"order_id": str(order.id), "status": init_status.value}, status="queued"))
     session.add(Payment(order_id=order.id, method=PaymentMethod(method), status=PaymentStatus.pending, amount_paise=order.total_paise))
+
+    recipient = user.email
+    if recipient:
+        eta = order.estimated_delivery_date.isoformat() if order.estimated_delivery_date else "to be confirmed"
+        eta_end = f" to {order.estimated_delivery_end_date.isoformat()}" if order.estimated_delivery_end_date else ""
+        message = f"Thank you for your order {order.order_number}. Expected delivery: {eta}{eta_end}. Track your order in My Orders."
+        session.add(OrderNotification(order_id=order.id, user_id=user.id, event_type="order_confirmation",
+                                      event_key="order-confirmation-email", channel="email", recipient=recipient,
+                                      message=message, payload={"order_number": order.order_number,
+                                      "estimated_delivery_date": eta, "estimated_delivery_end_date": order.estimated_delivery_end_date.isoformat() if order.estimated_delivery_end_date else None},
+                                      status="queued"))
 
     if chk.coupon:
         session.add(CouponRedemption(coupon_id=chk.coupon.id, user_id=user.id, order_id=order.id))

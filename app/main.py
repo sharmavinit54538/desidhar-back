@@ -15,7 +15,7 @@ from app.api import (
     delivery, admin_pincodes, admin_pincodes_bulk, admin_product_delivery,
     addresses, cart, checkout, admin_coupons,
     orders, admin_orders, payments, payment_methods, admin_payment_methods,
-    contact, invoices, admin_delivery, delivery_management,
+    contact, invoices, admin_delivery, delivery_management, admin_shipping,
 )
 
 settings = get_settings()
@@ -73,6 +73,7 @@ app.include_router(checkout.router)
 app.include_router(admin_coupons.router)
 app.include_router(orders.router)
 app.include_router(admin_orders.router)
+app.include_router(admin_shipping.router)
 app.include_router(payments.router)
 app.include_router(payment_methods.router)
 app.include_router(admin_payment_methods.router)

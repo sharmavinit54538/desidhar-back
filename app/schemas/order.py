@@ -301,8 +301,9 @@ class AdminOrderOut(OrderOut):
 
 
 class PlaceOrderResponse(BaseModel):
-    order: OrderOut
+    order: OrderOut | None = None
     payment_url: str | None = None
+    revised_quote: dict | None = None
 
 
 class OrderTrackingOut(BaseModel):

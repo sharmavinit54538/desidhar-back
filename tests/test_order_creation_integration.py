@@ -61,7 +61,7 @@ async def test_order_creation_persists_real_snapshots_and_rolls_back(db_session)
         cart.items.append(CartItem(product_id=second_product.id, quantity=1))
     await session.flush()
 
-    order, error = await place_order(
+    order, error, _ = await place_order(
         session, user, address.id, PaymentMethod.online.value,
         f"integration-{uuid.uuid4()}",
     )

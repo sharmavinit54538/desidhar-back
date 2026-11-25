@@ -24,6 +24,7 @@ async def create_order(
     data: OrderCreateIn,
     background_tasks: BackgroundTasks,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    quote_hash: str | None = Header(default=None, alias="X-Quote-Hash"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -61,7 +62,13 @@ async def create_order(
             cart.items.append(CartItem(product_id=product_id, quantity=quantity))
         await db.flush()
 
-    order, err = await place_order(db, user, data.address_id, data.payment_method, key, data.coupon_code, data.notes, data.delivery_speed)
+    order, err, quote_info = await place_order(db, user, data.address_id, data.payment_method, key, data.coupon_code, data.notes, data.delivery_speed, quote_hash)
+    # If quote_hash mismatch, return revised quote for confirmation (409 Conflict)
+    if quote_info and quote_info.get("revised_quote") is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"message": err, "revised_quote": quote_info["revised_quote"]}
+        )
     if err or not order:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=err or "Could not place order")
 
@@ -74,7 +81,7 @@ async def create_order(
         payment_data = await initiate_payment(db, order)
         payment_url = f"/payments/checkout?order_id={order.id}&provider_order_id={payment_data['provider_order_id']}"
 
-    return PlaceOrderResponse(order=order, payment_url=payment_url)
+    return PlaceOrderResponse(order=order, payment_url=payment_url, revised_quote=quote_info.get("revised_quote") if quote_info else None)
 
 
 

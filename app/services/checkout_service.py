@@ -6,6 +6,7 @@ from app.models.cart import Cart
 from app.models.address import Address
 from app.models.coupon import Coupon
 from app.models.pincode import Pincode
+from app.models.payment_method import PaymentMethodRecord
 from app.services.delivery_service import check_deliverable
 from app.services.coupon_service import validate_coupon_for_order
 from app.services.discount_allocation import allocate_discount
@@ -29,6 +30,8 @@ class EvaluatedCheckout:
     cod_available: bool
     free_delivery_above_paise: int = 0
     min_order_paise: int = 0
+    cod_payment_method_valid: bool = True
+    cod_blocking_reason: str | None = None
 
 
 async def evaluate_checkout(
@@ -93,6 +96,30 @@ async def evaluate_checkout(
     if payment_method == "cod" and not cod_avail:
         reasons.append(f"Cash on Delivery is currently unavailable for pincode {addr.pincode}")
 
+    # Validate COD payment method record (min_order, max_order, pincode serviceability)
+    cod_payment_method_valid = True
+    cod_blocking_reason = None
+    if payment_method == "cod":
+        cod_method = (await session.execute(select(PaymentMethodRecord).where(PaymentMethodRecord.id == "cod", PaymentMethodRecord.enabled.is_(True)))).scalar_one_or_none()
+        if not cod_method:
+            cod_payment_method_valid = False
+            cod_blocking_reason = "Cash on Delivery payment method is not configured"
+        else:
+            total_rupees = net_subtotal / 100.0
+            if total_rupees < cod_method.min_order:
+                cod_payment_method_valid = False
+                cod_blocking_reason = f"Minimum order for COD is ₹{cod_method.min_order}"
+            elif cod_method.max_order is not None and total_rupees > cod_method.max_order:
+                cod_payment_method_valid = False
+                cod_blocking_reason = f"Maximum order for COD is ₹{cod_method.max_order}"
+            # Check pincode serviceability for COD
+            if pin_rec and not pin_rec.is_serviceable:
+                cod_payment_method_valid = False
+                cod_blocking_reason = f"Cash on Delivery is not available for pincode {addr.pincode}"
+            elif pin_rec and pin_rec.cod_available is False:
+                cod_payment_method_valid = False
+                cod_blocking_reason = f"Cash on Delivery is explicitly disabled for pincode {addr.pincode}"
+
     discounts = allocate_discount(item_tuples, discount)
     items_out = []
     total_tax = 0
@@ -113,9 +140,11 @@ async def evaluate_checkout(
 
     total = subtotal - discount + del_fee
     return EvaluatedCheckout(
-        can_checkout=len(reasons) == 0, blocking_reasons=reasons, address=addr, pincode=addr.pincode,
+        can_checkout=len(reasons) == 0 and cod_payment_method_valid, blocking_reasons=reasons, address=addr, pincode=addr.pincode,
         items=items_out, subtotal_paise=subtotal, coupon_code=coupon.code if coupon else None, coupon=coupon,
         discount_paise=discount, delivery_fee_paise=del_fee, total_paise=total, total_tax_paise=total_tax,
-        cod_available=cod_avail,
+        cod_available=cod_avail, free_delivery_above_paise=pin_rec.free_delivery_above_paise if pin_rec else 0,
+        min_order_paise=pin_rec.min_order_paise if pin_rec else 0,
+        cod_payment_method_valid=cod_payment_method_valid, cod_blocking_reason=cod_blocking_reason,
     )
 

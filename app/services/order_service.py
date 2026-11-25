@@ -1,4 +1,6 @@
 import uuid
+import hashlib
+import json
 from datetime import datetime, timezone
 from sqlalchemy import select, text, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,11 +10,12 @@ from app.models.order_item import OrderItem
 from app.models.order_status_history import OrderStatusHistory
 from app.models.payment import Payment
 from app.models.coupon_redemption import CouponRedemption
+from app.models.delivery_management import DeliveryAssignment, DeliveryAssignmentHistory
+from app.models.order_lifecycle import OrderNotification, OrderAuditLog
 from app.services.checkout_service import evaluate_checkout
 from app.services.stock_service import reserve_stock, release_stock
 from app.services.order_transition import can_transition
 from app.services.cart_service import clear_cart
-from app.models.order_lifecycle import OrderNotification, OrderAuditLog
 from app.services.delivery_estimate_service import estimate_delivery
 
 
@@ -21,6 +24,22 @@ async def generate_order_number(session: AsyncSession) -> str:
     seq = res.scalar_one()
     date_str = datetime.now(timezone.utc).strftime("%Y%m%d")
     return f"DD-{date_str}-{seq:06d}"
+
+
+def _quote_hash(chk) -> str:
+    """Generate a stable hash of the checkout quote for binding placement to preview."""
+    # Include all price-affecting fields
+    quote_data = {
+        "subtotal_paise": chk.subtotal_paise,
+        "discount_paise": chk.discount_paise,
+        "delivery_fee_paise": chk.delivery_fee_paise,
+        "total_paise": chk.total_paise,
+        "total_tax_paise": chk.total_tax_paise,
+        "coupon_code": chk.coupon_code,
+        "pincode": chk.pincode,
+        "items": [(it["product_id"], it["quantity"], it["unit_price_paise"], it["line_total_paise"]) for it in chk.items],
+    }
+    return hashlib.sha256(json.dumps(quote_data, sort_keys=True, default=str).encode()).hexdigest()[:32]
 
 
 async def get_order_by_idempotency(session: AsyncSession, user_id: uuid.UUID, key: str) -> Order | None:
@@ -32,25 +51,42 @@ async def place_order(
     session: AsyncSession, user: User, address_id: uuid.UUID,
     method: str, idem_key: str, coupon_code: str | None = None, notes: str | None = None,
     delivery_speed: str = "standard",
-) -> tuple[Order | None, str | None]:
+    quote_hash: str | None = None,
+) -> tuple[Order | None, str | None, dict | None]:
     # Serialize checkout attempts per customer so the idempotency lookup and stock
     # reservation cannot race into duplicate orders.
     await session.execute(select(User.id).where(User.id == user.id).with_for_update())
     existing = await get_order_by_idempotency(session, user.id, idem_key)
     if existing:
-        return existing, None
+        return existing, None, None
 
     chk = await evaluate_checkout(session, user.id, address_id, coupon_code, method)
     if not chk.can_checkout or not chk.address:
-        return None, "; ".join(chk.blocking_reasons)
+        return None, "; ".join(chk.blocking_reasons), None
+
+    # Verify quote hash if provided - if mismatched, return revised quote for confirmation
+    if quote_hash:
+        current_hash = _quote_hash(chk)
+        if quote_hash != current_hash:
+            # Return revised quote for frontend to show and ask for confirmation
+            revised_quote = {
+                "subtotal_paise": chk.subtotal_paise,
+                "discount_paise": chk.discount_paise,
+                "delivery_fee_paise": chk.delivery_fee_paise,
+                "total_paise": chk.total_paise,
+                "total_tax_paise": chk.total_tax_paise,
+                "coupon_code": chk.coupon_code,
+                "quote_hash": current_hash,
+            }
+            return None, "Quote has changed; please confirm revised amounts", revised_quote
 
     items_to_reserve = [(it["product_id"], it["quantity"]) for it in chk.items]
     estimate = await estimate_delivery(session, chk.pincode, [it["product_id"] for it in chk.items], delivery_speed)
     if not estimate.serviceable:
-        return None, estimate.message
+        return None, estimate.message, None
     ok, stock_err = await reserve_stock(session, items_to_reserve)
     if not ok:
-        return None, stock_err or "Insufficient stock"
+        return None, stock_err or "Insufficient stock", None
 
     ord_num = await generate_order_number(session)
     now = datetime.now(timezone.utc)
@@ -114,7 +150,8 @@ async def place_order(
     await clear_cart(session, user.id)
     await session.flush()
     await session.refresh(order)
-    return order, None
+    # Return order, error, and quote hash for frontend to store
+    return order, None, {"quote_hash": _quote_hash(chk)}
 
 
 async def transition_order_status(
@@ -166,6 +203,33 @@ async def transition_order_status(
         if order.stock_reserved and not order.stock_released:
             await release_stock(session, [(it.product_id, it.quantity) for it in order.items])
             order.stock_released = True
+        # Cancel any active delivery assignment and free partner capacity
+        from app.models.delivery_management import DeliveryAssignment
+        ACTIVE_ASSIGNMENT_STATUSES = ("assigned", "accepted", "picked_up", "in_progress")
+        active_assignment = (await session.execute(select(DeliveryAssignment).where(
+            DeliveryAssignment.order_id == order.id,
+            DeliveryAssignment.status.in_(ACTIVE_ASSIGNMENT_STATUSES)
+        ).with_for_update())).scalar_one_or_none()
+        if active_assignment:
+            old_status = active_assignment.status
+            active_assignment.status = "cancelled"
+            active_assignment.version += 1
+            active_assignment.updated_at = now
+            session.add(DeliveryAssignmentHistory(
+                assignment_id=active_assignment.id, order_id=order.id,
+                actor_id=changed_by or order.user_id,
+                from_status=old_status, to_status="cancelled",
+                note=f"Order cancelled: {note or 'Cancelled'}"
+            ))
+            session.add(OrderNotification(
+                order_id=order.id, user_id=active_assignment.partner_id,
+                event_type="delivery_assignment",
+                event_key=f"assignment:{active_assignment.id}:cancelled:{active_assignment.version}",
+                channel="in_app", recipient=None,
+                message=f"Delivery assignment for order {order.order_number} was cancelled",
+                payload={"assignment_id": str(active_assignment.id), "order_id": str(order.id), "status": "cancelled"},
+                status="queued"
+            ))
     elif order.shipment:
         order.shipment.shipment_status = target
 

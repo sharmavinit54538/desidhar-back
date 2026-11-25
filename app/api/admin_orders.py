@@ -150,6 +150,13 @@ async def mark_order_paid(
     order = (await db.execute(select(Order).where(Order.id == order_id))).scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+    from app.models.order import PaymentMethod
+    from app.models.delivery_finance import CODCollection
+    # COD orders must have a recorded cash collection to be marked as paid
+    if order.payment_method == PaymentMethod.cod:
+        cod_collection = (await db.execute(select(CODCollection).where(CODCollection.order_id == order.id))).scalar_one_or_none()
+        if not cod_collection:
+            raise HTTPException(status_code=409, detail="COD order cannot be marked paid without a recorded cash collection. Use the delivery partner cash collection flow.")
     from datetime import datetime, timezone
     from app.models.order import PaymentStatus
     from app.models.payment import Payment

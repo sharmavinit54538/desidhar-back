@@ -69,3 +69,6 @@ class CheckoutPreviewOut(BaseModel):
     estimated_delivery_date: date | None = None
     estimated_delivery_end_date: date | None = None
     delivery_speed: str = "standard"
+    # COD payment method validation
+    cod_payment_method_valid: bool = True
+    cod_blocking_reason: str | None = None

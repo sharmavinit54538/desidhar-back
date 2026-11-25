@@ -54,7 +54,7 @@ async def test_admin_partner_cod_otp_and_settlement_workflow(db_session, monkeyp
     cart.items.clear()
     cart.items.append(CartItem(product_id=product.id, quantity=1))
     await db_session.flush()
-    order, error = await place_order(db_session, customer, address.id, "cod", f"dp-order-{uuid.uuid4()}")
+    order, error, _ = await place_order(db_session, customer, address.id, "cod", f"dp-order-{uuid.uuid4()}")
     assert error is None and order
     admin_headers = {"Authorization": f"Bearer {create_admin_token(str(admin.id))}"}
     customer_headers = {"Authorization": f"Bearer {create_customer_token(str(customer.id))}"}

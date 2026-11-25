@@ -45,6 +45,9 @@ async def place_order(
         return None, "; ".join(chk.blocking_reasons)
 
     items_to_reserve = [(it["product_id"], it["quantity"]) for it in chk.items]
+    estimate = await estimate_delivery(session, chk.pincode, [it["product_id"] for it in chk.items], delivery_speed)
+    if not estimate.serviceable:
+        return None, estimate.message
     ok, stock_err = await reserve_stock(session, items_to_reserve)
     if not ok:
         return None, stock_err or "Insufficient stock"
@@ -54,10 +57,6 @@ async def place_order(
     init_status = OrderStatus.placed if method == PaymentMethod.cod.value else OrderStatus.payment_pending
     placed_at = now if init_status == OrderStatus.placed else None
 
-    estimate = await estimate_delivery(session, chk.pincode, [it["product_id"] for it in chk.items], delivery_speed)
-    if not estimate.serviceable:
-        await release_stock(session, items_to_reserve)
-        return None, estimate.message
     order = Order(
         order_number=ord_num, user_id=user.id, status=init_status,
         payment_method=PaymentMethod(method), payment_status=PaymentStatus.pending,

@@ -28,7 +28,7 @@ def format_delivery_response(p, pincode: str) -> DeliveryCheckOut:
     del_charge = round(float(p.delivery_fee_paise or 0) / 100.0, 2)
     free_above = round(float(p.free_delivery_above_paise or 0) / 100.0, 2)
     min_ord = round(float(p.min_order_paise or 0) / 100.0, 2)
-    eta_str = f"{p.eta_hours} hours" if p.eta_hours else "Tomorrow, 7-9 AM"
+    eta_str = f"{p.eta_hours} hours" if p.eta_hours else None
 
     return DeliveryCheckOut(
         pincode=p.pincode,

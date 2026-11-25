@@ -31,6 +31,7 @@ async def _client_for_session(db_session):
 @pytest.mark.asyncio
 async def test_admin_partner_cod_otp_and_settlement_workflow(db_session, monkeypatch):
     admin = await db_session.scalar(select(User).where(User.role == Role.admin).limit(1))
+    legacy_order = await db_session.scalar(select(Order).where(Order.estimated_delivery_date.is_(None)).limit(1))
     candidate = (await db_session.execute(
         select(User, Address, Pincode, Product)
         .join(Address, Address.user_id == User.id)
@@ -56,8 +57,24 @@ async def test_admin_partner_cod_otp_and_settlement_workflow(db_session, monkeyp
     order, error = await place_order(db_session, customer, address.id, "cod", f"dp-order-{uuid.uuid4()}")
     assert error is None and order
     admin_headers = {"Authorization": f"Bearer {create_admin_token(str(admin.id))}"}
+    customer_headers = {"Authorization": f"Bearer {create_customer_token(str(customer.id))}"}
     client, previous = await _client_for_session(db_session)
     try:
+        if legacy_order:
+            legacy_detail = await client.get(f"/admin/orders/{legacy_order.id}", headers=admin_headers)
+            assert legacy_detail.status_code == 200, legacy_detail.text
+            assert legacy_detail.json()["estimated_delivery_date"] is None
+            legacy_assignments = await client.get(
+                f"/admin/delivery/orders/{legacy_order.id}/assignments", headers=admin_headers
+            )
+            assert legacy_assignments.status_code == 200, legacy_assignments.text
+
+        admin_order = await client.get(f"/admin/orders/{order.id}", headers=admin_headers)
+        assert admin_order.status_code == 200, admin_order.text
+        assert admin_order.json()["estimated_delivery_date"] == order.estimated_delivery_date.isoformat()
+        customer_order = await client.get(f"/orders/{order.id}", headers=customer_headers)
+        assert customer_order.status_code == 200, customer_order.text
+
         created = await client.post("/admin/delivery/partners", headers=admin_headers, json={
             "username": partner_username, "password": partner_password, "full_name": "Delivery Test",
             "phone": "9876543210", "employee_id": f"TEST-{uuid.uuid4().hex[:8]}",
@@ -87,6 +104,9 @@ async def test_admin_partner_cod_otp_and_settlement_workflow(db_session, monkeyp
             json={"partner_id": partner_id})
         assert assigned.status_code == 201, assigned.text
         assert assigned.json()["status"] == "assigned"
+        assignment_history = await client.get(f"/admin/delivery/orders/{order.id}/assignments", headers=admin_headers)
+        assert assignment_history.status_code == 200, assignment_history.text
+        assert len(assignment_history.json()) == 1
         bypass = await client.post(f"/admin/orders/{order.id}/status", headers=admin_headers,
             json={"status": "delivered", "expected_version": order_version})
         assert bypass.status_code == 409

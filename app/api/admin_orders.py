@@ -14,7 +14,7 @@ from app.services.order_service import admin_list_orders, transition_order_statu
 from app.services.refund_service import create_refund, list_order_refunds
 from app.services.payment_service import cancel_expired_unpaid_orders
 from app.models.order_lifecycle import Shipment, OrderNotification
-from app.services.email_service import send_order_email
+from app.services.email_service import dispatch_order_notification
 from fastapi import BackgroundTasks
 
 router = APIRouter(prefix="/admin/orders", tags=["admin-orders"])
@@ -112,6 +112,8 @@ async def update_delivery_details(
     if "courier_name" in fields or "tracking_number" in fields or "tracking_url" in fields:
         shipment = order.shipment
         if shipment is None:
+            if order.status not in (OrderStatus.shipped, OrderStatus.out_for_delivery, OrderStatus.delivered):
+                raise HTTPException(status_code=409, detail="Move the order to shipped before adding courier tracking")
             shipment = Shipment(order_id=order.id, courier_name=data.courier_name or "Courier pending",
                                 shipment_reference=order.order_number, shipment_status=order.status.value,
                                 shipped_at=order.shipped_at or datetime.now(timezone.utc))
@@ -127,10 +129,15 @@ async def update_delivery_details(
     if revised and original and revised > original and data.delay_reason and order.customer_email:
         message = f"Your order {order.order_number} is delayed. Revised expected delivery: {revised.isoformat()}. Reason: {data.delay_reason}. Track your order in My Orders."
         event_key = f"delivery-delay:{revised.isoformat()}"
-        db.add(OrderNotification(order_id=order.id, user_id=order.user_id, event_type="delivery_delay",
-                                 event_key=event_key, channel="email", recipient=order.customer_email,
-                                 message=message, payload={"revised_delivery_date": revised.isoformat(), "reason": data.delay_reason}, status="queued"))
-        background_tasks.add_task(send_order_email, order.customer_email, f"Delivery update for {order.order_number}", message)
+        notified = await db.scalar(select(OrderNotification.id).where(
+            OrderNotification.order_id == order.id, OrderNotification.event_key == event_key,
+            OrderNotification.channel == "email"))
+        if not notified:
+            db.add(OrderNotification(order_id=order.id, user_id=order.user_id, event_type="delivery_delay",
+                                     event_key=event_key, channel="email", recipient=order.customer_email,
+                                     message=message, payload={"revised_delivery_date": revised.isoformat(), "reason": data.delay_reason}, status="queued"))
+            background_tasks.add_task(dispatch_order_notification, str(order.id), event_key,
+                                      f"Delivery update for {order.order_number}")
     await db.flush()
     await db.refresh(order)
     return order

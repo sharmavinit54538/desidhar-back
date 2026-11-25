@@ -126,6 +126,10 @@ class Order(Base):
         return self.shipment.shipment_status if self.shipment else self.status.value
 
     @property
+    def actual_delivery_date(self) -> datetime | None:
+        return self.delivered_at
+
+    @property
     def allowed_next_statuses(self) -> list[str]:
         from app.services.order_transition import ALLOWED_TRANSITIONS
         curr = self.status.value if hasattr(self.status, "value") else str(self.status)

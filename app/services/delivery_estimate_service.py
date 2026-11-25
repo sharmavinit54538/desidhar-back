@@ -28,6 +28,8 @@ class DeliveryEstimate:
 
 def add_working_days(start: date, days: int, weekdays: list[int], holidays: set[date]) -> date:
     current = start
+    while current.weekday() not in weekdays or current in holidays:
+        current += timedelta(days=1)
     remaining = days
     while remaining:
         current += timedelta(days=1)

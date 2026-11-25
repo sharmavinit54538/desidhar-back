@@ -274,6 +274,13 @@ class OrderOut(BaseModel):
     packed_at: datetime | None = None
     shipped_at: datetime | None = None
     out_for_delivery_at: datetime | None = None
+    estimated_delivery_date: date | None = None
+    estimated_delivery_end_date: date | None = None
+    revised_delivery_date: date | None = None
+    actual_delivery_date: datetime | None = None
+    delivery_status: str | None = None
+    delivery_speed: str = "standard"
+    delay_reason: str | None = None
     amount_paid_paise: int = 0
     outstanding_amount_paise: int = 0
     customer_email: str | None = None

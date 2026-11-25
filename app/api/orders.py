@@ -14,7 +14,7 @@ from app.services.payment_service import initiate_payment
 from app.models.cart_item import CartItem
 from app.models.payment import Payment
 from app.services.cart_service import get_or_create_cart
-from app.services.email_service import send_order_email
+from app.services.email_service import dispatch_order_notification
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -66,11 +66,8 @@ async def create_order(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=err or "Could not place order")
 
     if order.customer_email:
-        eta = order.estimated_delivery_date.isoformat() if order.estimated_delivery_date else "to be confirmed"
-        eta_end = f" to {order.estimated_delivery_end_date.isoformat()}" if order.estimated_delivery_end_date else ""
-        background_tasks.add_task(send_order_email, order.customer_email,
-                                  f"Order {order.order_number} confirmed",
-                                  f"Thank you for your order {order.order_number}. Expected delivery: {eta}{eta_end}. Track your order in My Orders.")
+        background_tasks.add_task(dispatch_order_notification, str(order.id), "order-confirmation-email",
+                                  f"Order {order.order_number} confirmed")
 
     payment_url = None
     if order.payment_method == PaymentMethod.online:

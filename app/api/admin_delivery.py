@@ -9,7 +9,7 @@ from app.core.passwords import hash_password
 from app.models.user import User, Role
 from app.models.order import Order, OrderStatus
 from app.models.delivery_management import DeliveryPartnerProfile, DeliveryAssignment, DeliveryAssignmentHistory
-from app.schemas.delivery_management import DeliveryPartnerCreateIn, DeliveryPartnerOut, DeliveryAssignmentIn, DeliveryAssignmentOut
+from app.schemas.delivery_management import DeliveryPartnerCreateIn, DeliveryPartnerOut, DeliveryAssignmentIn, DeliveryAssignmentOut, EligibleDeliveryPartnerOut
 from app.models.delivery_finance import CashSettlement, CashSettlementItem
 from app.models.order_lifecycle import OrderNotification
 from app.schemas.delivery_finance import CashSettlementOut, CashSettlementReconcileIn, CashSettlementRejectIn
@@ -39,6 +39,56 @@ async def list_partners(db: AsyncSession = Depends(get_db), _: User = Depends(re
             service_pincodes=profile.service_pincodes, vehicle_type=profile.vehicle_type,
             vehicle_registration=profile.vehicle_registration, max_active_deliveries=profile.max_active_deliveries,
             availability=profile.availability, active_assignments=active, completed_deliveries=completed))
+    return result
+
+
+@router.get("/orders/{order_id}/eligible-partners", response_model=list[EligibleDeliveryPartnerOut])
+async def get_eligible_partners(order_id: uuid.UUID, db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)):
+    order = await db.get(Order, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    rows = (await db.execute(
+        select(User, DeliveryPartnerProfile)
+        .join(DeliveryPartnerProfile, DeliveryPartnerProfile.user_id == User.id)
+        .where(User.role == Role.delivery_partner)
+        .order_by(User.full_name, User.username)
+    )).all()
+
+    result = []
+    for user, profile in rows:
+        active = await db.scalar(select(func.count()).select_from(DeliveryAssignment).where(
+            DeliveryAssignment.partner_id == user.id, DeliveryAssignment.status.in_(ACTIVE_ASSIGNMENTS))) or 0
+        completed = await db.scalar(select(func.count()).select_from(DeliveryAssignment).where(
+            DeliveryAssignment.partner_id == user.id, DeliveryAssignment.status == "completed")) or 0
+
+        remaining_capacity = max(0, profile.max_active_deliveries - active)
+
+        is_eligible = True
+        reasons = []
+
+        if not user.is_active:
+            is_eligible = False
+            reasons.append("Partner account is inactive")
+        if profile.availability != "available":
+            is_eligible = False
+            reasons.append("Partner is not available")
+        if active >= profile.max_active_deliveries:
+            is_eligible = False
+            reasons.append("Partner has reached maximum active delivery capacity")
+        if order.shipping_pincode not in profile.service_pincodes:
+            is_eligible = False
+            reasons.append("Order PIN code is outside partner's service area")
+
+        result.append(EligibleDeliveryPartnerOut(
+            user_id=user.id, employee_id=profile.employee_id, full_name=user.full_name, phone=user.phone,
+            email=user.email, is_active=user.is_active, service_area=profile.service_area,
+            service_pincodes=profile.service_pincodes, vehicle_type=profile.vehicle_type,
+            vehicle_registration=profile.vehicle_registration, max_active_deliveries=profile.max_active_deliveries,
+            availability=profile.availability, active_assignments=active, completed_deliveries=completed,
+            remaining_capacity=remaining_capacity, is_eligible=is_eligible,
+            ineligibility_reason="; ".join(reasons) if reasons else None))
+
     return result
 
 
@@ -79,6 +129,8 @@ async def set_partner_active(partner_id: uuid.UUID, active: bool, db: AsyncSessi
     user.is_active = active
     if not active:
         profile.availability = "offline"
+    else:
+        profile.availability = "available"
     await db.flush()
     return DeliveryPartnerOut(user_id=user.id, employee_id=profile.employee_id, full_name=user.full_name,
         phone=user.phone, email=user.email, is_active=user.is_active, service_area=profile.service_area,

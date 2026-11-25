@@ -63,6 +63,26 @@ class DeliveryAssignmentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class EligibleDeliveryPartnerOut(BaseModel):
+    user_id: uuid.UUID
+    employee_id: str
+    full_name: str | None
+    phone: str | None
+    email: str | None
+    is_active: bool
+    service_area: str | None
+    service_pincodes: list[str]
+    vehicle_type: str | None
+    vehicle_registration: str | None
+    max_active_deliveries: int
+    availability: str
+    active_assignments: int
+    completed_deliveries: int
+    remaining_capacity: int
+    is_eligible: bool
+    ineligibility_reason: str | None = None
+
+
 class DeliveryOrderOut(BaseModel):
     id: uuid.UUID
     order_number: str

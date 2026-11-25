@@ -87,3 +87,40 @@ async def send_order_email(email: str, subject: str, body: str) -> None:
     except Exception as e:
         logger.error("Failed to send order lifecycle email: %s", type(e).__name__)
         raise
+
+
+async def dispatch_order_notification(order_id: str, event_key: str, subject: str) -> None:
+    """Dispatch a committed order email outbox record and persist its result."""
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+    import uuid
+    from sqlalchemy import select
+    from app.core.db import async_session_maker
+    from app.models.order_lifecycle import OrderNotification
+
+    record = None
+    for attempt in range(6):
+        async with async_session_maker() as session:
+            record = (await session.execute(select(OrderNotification).where(
+                OrderNotification.order_id == uuid.UUID(order_id),
+                OrderNotification.event_key == event_key,
+                OrderNotification.channel == "email",
+            ))).scalar_one_or_none()
+            if record:
+                if record.status == "delivered" or not record.recipient:
+                    return
+                try:
+                    await send_order_email(record.recipient, subject, record.message)
+                    record.status = "delivered"
+                    record.delivered_at = datetime.now(timezone.utc)
+                    record.last_error = None
+                    record.next_attempt_at = None
+                except Exception:
+                    record.status = "failed"
+                    record.attempts += 1
+                    record.last_error = "SMTP delivery failed"
+                    record.next_attempt_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+                await session.commit()
+                return
+        if attempt < 5:
+            await asyncio.sleep(0.1)

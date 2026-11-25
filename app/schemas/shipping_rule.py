@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ShippingRuleIn(BaseModel):
@@ -27,13 +27,6 @@ class ShippingRuleIn(BaseModel):
         from datetime import date
         normalized = sorted({date.fromisoformat(day).isoformat() for day in days})
         return normalized
-
-    @model_validator(mode="after")
-    def requires_destination(self):
-        if not any((self.pincode, self.city, self.state, self.shipping_zone)):
-            raise ValueError("Configure at least one destination: PIN code, city, state, or zone")
-        return self
-
 
 class ShippingRuleOut(ShippingRuleIn):
     id: uuid.UUID

@@ -22,7 +22,7 @@ def test_single_alembic_head():
     script = ScriptDirectory.from_config(alembic_cfg)
     heads = script.get_heads()
     assert len(heads) == 1, f"Expected exactly 1 Alembic head, got {len(heads)}: {heads}"
-    assert heads[0] == "ac8f2d2cb09a"
+    assert heads[0] == script.get_current_head()
 
 
 def test_database_is_at_head():
@@ -32,7 +32,13 @@ def test_database_is_at_head():
     with engine.connect() as conn:
         context = MigrationContext.configure(conn)
         current_rev = context.get_current_revision()
-        assert current_rev == "ac8f2d2cb09a", f"Database is at {current_rev}, expected ac8f2d2cb09a"
+        alembic_cfg = Config(_ALEMBIC_INI_PATH)
+        alembic_cfg.set_main_option(
+            "script_location",
+            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "alembic"),
+        )
+        expected_head = ScriptDirectory.from_config(alembic_cfg).get_current_head()
+        assert current_rev == expected_head, f"Database is at {current_rev}, expected {expected_head}"
 
 
 def test_schema_matches_orm_models():
@@ -61,6 +67,16 @@ def test_schema_matches_orm_models():
             assert orm_c.nullable == db_c["nullable"], (
                 f"Column '{table_name}.{col_name}' nullable mismatch: ORM={orm_c.nullable}, DB={db_c['nullable']}"
             )
+
+    orders = {c["name"]: c for c in insp.get_columns("orders")}
+    from sqlalchemy import Date, DateTime, String
+    for name in ("estimated_delivery_date", "estimated_delivery_end_date", "revised_delivery_date"):
+        assert isinstance(orders[name]["type"], Date), f"orders.{name} must be DATE, got {orders[name]['type']}"
+    for name in ("placed_at", "confirmed_at", "packed_at", "shipped_at", "out_for_delivery_at", "delivered_at"):
+        col_type = orders[name]["type"]
+        assert isinstance(col_type, DateTime) and col_type.timezone, f"orders.{name} must be TIMESTAMPTZ, got {col_type}"
+    for name in ("delay_reason", "delivery_speed"):
+        assert isinstance(orders[name]["type"], String), f"orders.{name} must be VARCHAR, got {orders[name]['type']}"
 
 
 def test_product_check_constraints_exist():

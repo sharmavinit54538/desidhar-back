@@ -19,6 +19,7 @@ from app.models.refund import Refund, RefundReason
 from app.models.payment_method import PaymentMethodRecord
 from app.models.invoice import Invoice
 from app.models.order_lifecycle import Shipment, InventoryTransaction, OrderOperation, OrderNotification, OrderAuditLog
+from app.models.delivery_management import DeliveryPartnerProfile, DeliveryAssignment, DeliveryAssignmentHistory
 
 __all__ = [
     "User", "Role", "OTPCode", "Category", "Product", "UnitEnum",
@@ -29,5 +30,6 @@ __all__ = [
     "PaymentMethodRecord",
     "Invoice",
     "Shipment", "InventoryTransaction", "OrderOperation", "OrderNotification", "OrderAuditLog",
+    "DeliveryPartnerProfile", "DeliveryAssignment", "DeliveryAssignmentHistory",
 ]
 

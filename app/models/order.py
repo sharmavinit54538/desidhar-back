@@ -45,7 +45,7 @@ class Order(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     order_number: Mapped[str] = mapped_column(String(30), unique=True, nullable=False, index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
-    status: Mapped[OrderStatus] = mapped_column(Enum(OrderStatus, native_enum=False), default=OrderStatus.placed, nullable=False)
+    status: Mapped[OrderStatus] = mapped_column(Enum(OrderStatus, native_enum=False, length=30), default=OrderStatus.placed, nullable=False)
     payment_method: Mapped[PaymentMethod] = mapped_column(Enum(PaymentMethod, native_enum=False), nullable=False)
     payment_status: Mapped[PaymentStatus] = mapped_column(Enum(PaymentStatus, native_enum=False), default=PaymentStatus.pending, nullable=False)
 
@@ -101,6 +101,10 @@ class Order(Base):
         return max(0, self.total_paise - self.amount_paid_paise)
 
     @property
+    def outstanding_amount_paise(self) -> int:
+        return self.outstanding_paise
+
+    @property
     def refunded_amount_paise(self) -> int:
         return sum(refund.amount_paise for refund in self.refunds if refund.status == "completed")
 
@@ -115,6 +119,16 @@ class Order(Base):
     @property
     def delivery_status(self) -> str:
         return self.shipment.shipment_status if self.shipment else self.status.value
+
+    @property
+    def allowed_next_statuses(self) -> list[str]:
+        from app.services.order_transition import ALLOWED_TRANSITIONS
+        curr = self.status.value if hasattr(self.status, "value") else str(self.status)
+        return sorted(list(ALLOWED_TRANSITIONS.get(curr, set())))
+
+    @property
+    def allowed_actions(self) -> list[str]:
+        return self.allowed_next_statuses
 
     __table_args__ = (
         CheckConstraint("total_paise = subtotal_paise - discount_paise + delivery_fee_paise", name="ck_orders_total_consistency"),

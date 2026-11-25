@@ -48,6 +48,27 @@ async def authenticate_admin(session: AsyncSession, username: str, password: str
     return user
 
 
+async def authenticate_delivery_partner(session: AsyncSession, username: str, password: str) -> User | None:
+    username_lower = username.lower().strip()
+    result = await session.execute(select(User).where(User.username == username_lower, User.role == Role.delivery_partner))
+    user = result.scalar_one_or_none()
+    if user is None:
+        verify_password(password, dummy_hash())
+        return None
+    from app.core.clock import utc_now
+    if not user.is_active or (user.locked_until and user.locked_until > utc_now()):
+        return None
+    if not verify_password(password, user.password_hash):
+        user.failed_logins += 1
+        if user.failed_logins >= 5:
+            from datetime import timedelta
+            user.locked_until = utc_now() + timedelta(minutes=15)
+        return None
+    user.failed_logins = 0
+    user.locked_until = None
+    return user
+
+
 async def get_user_by_id(session: AsyncSession, user_id: str) -> User | None:
     import uuid
     try:

@@ -113,8 +113,17 @@ class RefundProcessIn(BaseModel):
 
 
 class OrderStatusUpdateIn(OrderActionIn):
+    expected_version: int = Field(ge=1)
     status: str
     note: str | None = Field(default=None, max_length=255)
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def normalize_status(cls, v: object) -> str:
+        if isinstance(v, str):
+            s = v.strip().lower()
+            return s
+        return str(v)
 
 
 class OrderItemOut(BaseModel):

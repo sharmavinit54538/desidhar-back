@@ -4,7 +4,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db, require_admin
 from app.models.user import User
-from app.models.order import Order
+from app.models.order import Order, OrderStatus, PaymentMethod, PaymentStatus
 from app.schemas.order import OrderOut, OrderListOut, OrderStatusUpdateIn, OrderSummaryOut
 from app.schemas.refund import RefundCreateIn, RefundOut
 from app.services.order_service import admin_list_orders, transition_order_status
@@ -47,6 +47,12 @@ async def list_orders(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_admin),
 ):
+    if status and status.strip().lower() not in OrderStatus._value2member_map_:
+        raise HTTPException(status_code=422, detail=f"Unsupported fulfillment status '{status}'. Use an explicit status such as placed or payment_pending.")
+    if payment_method and payment_method.strip().lower() not in PaymentMethod._value2member_map_:
+        raise HTTPException(status_code=422, detail=f"Unsupported payment method '{payment_method}'.")
+    if payment_status and payment_status.strip().lower() not in PaymentStatus._value2member_map_:
+        raise HTTPException(status_code=422, detail=f"Unsupported payment status '{payment_status}'.")
     items, total = await admin_list_orders(db, status, payment_method, payment_status, pincode, q, page, page_size)
     return OrderListOut(items=items, total=total, page=page, page_size=page_size)
 

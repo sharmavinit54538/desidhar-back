@@ -1,3 +1,4 @@
+import os
 import pytest
 from sqlalchemy import create_engine, inspect, text
 from alembic.config import Config
@@ -8,14 +9,20 @@ from app.core.config import get_settings
 from app.core.db import Base
 import app.models
 
+_ALEMBIC_INI_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "alembic.ini")
+
 
 def test_single_alembic_head():
     """Verify that Alembic has a single head and no branching issues."""
-    alembic_cfg = Config("alembic.ini")
+    alembic_cfg = Config(_ALEMBIC_INI_PATH)
+    alembic_cfg.set_main_option(
+        "script_location",
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "alembic"),
+    )
     script = ScriptDirectory.from_config(alembic_cfg)
     heads = script.get_heads()
     assert len(heads) == 1, f"Expected exactly 1 Alembic head, got {len(heads)}: {heads}"
-    assert heads[0] == "f47a1928bc01"
+    assert heads[0] == "ab18d190e4f2"
 
 
 def test_database_is_at_head():
@@ -25,7 +32,7 @@ def test_database_is_at_head():
     with engine.connect() as conn:
         context = MigrationContext.configure(conn)
         current_rev = context.get_current_revision()
-        assert current_rev == "f47a1928bc01", f"Database is at {current_rev}, expected f47a1928bc01"
+        assert current_rev == "ab18d190e4f2", f"Database is at {current_rev}, expected ab18d190e4f2"
 
 
 def test_schema_matches_orm_models():

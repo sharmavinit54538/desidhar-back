@@ -10,7 +10,6 @@ from app.services.order_service import (
 )
 from app.services.payment_service import initiate_payment
 
-from sqlalchemy import delete
 from app.models.cart_item import CartItem
 from app.services.cart_service import get_or_create_cart
 
@@ -27,9 +26,11 @@ async def create_order(
     key = (idempotency_key or str(uuid.uuid4())).strip()
     if data.items:
         cart = await get_or_create_cart(db, user.id)
-        await db.execute(delete(CartItem).where(CartItem.cart_id == cart.id))
+        # Update the loaded relationship collection so checkout cannot see stale
+        # cart items from the identity map after a bulk DELETE.
+        cart.items.clear()
         for it in data.items:
-            db.add(CartItem(cart_id=cart.id, product_id=it.product_id, quantity=it.quantity))
+            cart.items.append(CartItem(product_id=it.product_id, quantity=it.quantity))
         await db.flush()
 
     order, err = await place_order(db, user, data.address_id, data.payment_method, key, data.coupon_code, data.notes)

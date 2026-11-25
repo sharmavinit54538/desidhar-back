@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import select, text, func, or_, update
+from sqlalchemy import select, text, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.user import User
 from app.models.order import Order, OrderStatus, PaymentMethod, PaymentStatus
@@ -12,7 +12,7 @@ from app.services.checkout_service import evaluate_checkout
 from app.services.stock_service import reserve_stock, release_stock
 from app.services.order_transition import can_transition
 from app.services.cart_service import clear_cart
-from app.models.order_lifecycle import Shipment, OrderNotification, OrderAuditLog
+from app.models.order_lifecycle import OrderNotification, OrderAuditLog
 
 
 async def generate_order_number(session: AsyncSession) -> str:
@@ -31,6 +31,9 @@ async def place_order(
     session: AsyncSession, user: User, address_id: uuid.UUID,
     method: str, idem_key: str, coupon_code: str | None = None, notes: str | None = None,
 ) -> tuple[Order | None, str | None]:
+    # Serialize checkout attempts per customer so the idempotency lookup and stock
+    # reservation cannot race into duplicate orders.
+    await session.execute(select(User.id).where(User.id == user.id).with_for_update())
     existing = await get_order_by_idempotency(session, user.id, idem_key)
     if existing:
         return existing, None
@@ -58,7 +61,7 @@ async def place_order(
         shipping_state=chk.address.state, shipping_pincode=chk.address.pincode,
         subtotal_paise=chk.subtotal_paise, discount_paise=chk.discount_paise,
         coupon_code=chk.coupon_code, delivery_fee_paise=chk.delivery_fee_paise,
-        total_paise=chk.total_paise, tax_paise=chk.total_tax_paise, notes=notes,
+        total_paise=chk.total_paise, tax_paise=chk.total_tax_paise, notes=notes, items=[], history=[],
         idempotency_key=idem_key, placed_at=placed_at,
     )
     session.add(order)
@@ -69,14 +72,22 @@ async def place_order(
         oi = OrderItem(
             order_id=order.id, product_id=p.id, name_snapshot=p.name,
             pack_size_snapshot=p.pack_size, unit_snapshot=p.unit.value,
+            # This catalog has no SKU field/table; preserve null rather than inventing one.
+            sku_snapshot=None,
+            image_url_snapshot=(p.images[0].url if p.images else None),
             quantity=it["quantity"], unit_price_paise=it["unit_price_paise"],
             unit_mrp_paise=it["unit_mrp_paise"], unit_cost_paise=p.cost_price_paise,
             gst_rate_percent=p.gst_rate_percent, discount_paise=it["discount_paise"],
             tax_paise=it["tax_paise"], line_total_paise=it["line_total_paise"],
         )
-        session.add(oi)
+        order.items.append(oi)
 
-    session.add(OrderStatusHistory(order_id=order.id, from_status=None, to_status=init_status.value, changed_by=user.id, note="Order created"))
+    order.history.append(OrderStatusHistory(order_id=order.id, from_status=None, to_status=init_status.value,
+                                           changed_by=user.id, note="Order created", actor_type="customer",
+                                           customer_visible_message="Order placed", event_source="checkout"))
+    session.add(OrderNotification(order_id=order.id, user_id=user.id, event_type="order_status",
+                                  event_key=f"status:1:{init_status.value}", channel="in_app", recipient=None,
+                                  message=f"Order {init_status.value.replace('_', ' ')}", payload={"order_id": str(order.id), "status": init_status.value}, status="queued"))
     session.add(Payment(order_id=order.id, method=PaymentMethod(method), status=PaymentStatus.pending, amount_paise=order.total_paise))
 
     if chk.coupon:
@@ -91,11 +102,16 @@ async def place_order(
 async def transition_order_status(
     session: AsyncSession, order: Order, target: str, changed_by: uuid.UUID | None = None,
     note: str | None = None, is_admin: bool = False, expected_version: int | None = None,
+    actor_type: str | None = None,
 ) -> tuple[bool, str | None]:
     # Serialize competing transitions and reject stale admin/customer forms.
     locked = (await session.execute(select(Order).where(Order.id == order.id).with_for_update())).scalar_one()
     if expected_version is not None and locked.version != expected_version:
-        return False, "Order changed since it was loaded; refresh and try again"
+        permitted = ", ".join(locked.allowed_next_statuses) or "none"
+        return False, (
+            f"Order status changed concurrently: current='{locked.status.value}', requested='{target}', "
+            f"permitted next statuses: {permitted}. Refresh the order and try again."
+        )
     order = locked
     ok, err = can_transition(order.status.value, target, is_admin=is_admin)
     if not ok:
@@ -112,42 +128,38 @@ async def transition_order_status(
         order.packed_at = now
     elif target == OrderStatus.shipped.value:
         order.shipped_at = now
-        shipment = order.shipment
-        if not shipment:
-            shipment = Shipment(order_id=order.id, courier_name="DesiDhar Logistics", shipment_reference=order.order_number,
-                                shipment_status=target, shipped_at=now)
-            session.add(shipment)
-        else:
-            shipment.shipment_status = target
-            shipment.shipped_at = now
+        if order.shipment:
+            order.shipment.shipment_status = target
+            order.shipment.shipped_at = now
     elif target == OrderStatus.out_for_delivery.value:
         order.out_for_delivery_at = now
+        if order.shipment:
+            order.shipment.shipment_status = target
     elif target == OrderStatus.delivered.value:
         order.delivered_at = now
-        for p in order.payments:
-            if p.method == PaymentMethod.cod and p.status == PaymentStatus.pending:
-                p.status = PaymentStatus.paid
-                p.paid_at = now
-                order.payment_status = PaymentStatus.paid
+        if order.shipment:
+            order.shipment.shipment_status = target
+            order.shipment.delivered_at = now
+        # Fulfill Section 10: Fulfillment status remains separate from payment status.
+        # Do not automatically mark COD as paid; payment must be separately verified.
     elif target == OrderStatus.cancelled.value:
         order.cancelled_at = now
         order.cancel_reason = note or "Cancelled"
         if order.stock_reserved and not order.stock_released:
             await release_stock(session, [(it.product_id, it.quantity) for it in order.items])
             order.stock_released = True
-    elif target == OrderStatus.delivered.value and order.shipment:
-        order.shipment.shipment_status = target
-        order.shipment.delivered_at = now
     elif order.shipment:
         order.shipment.shipment_status = target
 
     visible = note if is_admin and note else f"Order {target.replace('_', ' ')}"
-    session.add(OrderStatusHistory(order_id=order.id, from_status=prev, to_status=target, changed_by=changed_by,
-                                   note=note, actor_type="admin" if is_admin else "customer",
-                                   reason=note, customer_visible_message=visible, event_source="api"))
+    resolved_actor = actor_type or ("admin" if is_admin else "customer")
+    order.history.append(OrderStatusHistory(order_id=order.id, from_status=prev, to_status=target, changed_by=changed_by,
+                                            note=note, actor_type=resolved_actor,
+                                            reason=note, internal_admin_note=note if is_admin else None,
+                                            customer_visible_message=visible, event_source="api"))
     event_key = f"status:{order.version}:{target}"
     session.add(OrderAuditLog(order_id=order.id, actor_id=changed_by,
-                              actor_type="admin" if is_admin else "customer", action="status_change",
+                              actor_type=resolved_actor, action="status_change",
                               event_key=event_key, details={"from": prev, "to": target, "note": note}))
     session.add(OrderNotification(order_id=order.id, user_id=order.user_id, event_type="order_status",
                                   event_key=event_key, channel="in_app", recipient=None,
@@ -177,14 +189,21 @@ async def admin_list_orders(
     stmt = select(Order)
     count_stmt = select(func.count()).select_from(Order)
     if status:
-        stmt = stmt.where(Order.status == OrderStatus(status))
-        count_stmt = count_stmt.where(Order.status == OrderStatus(status))
+        norm_status = status.strip().lower()
+        if norm_status in OrderStatus._value2member_map_:
+            order_enum = OrderStatus(norm_status)
+            stmt = stmt.where(Order.status == order_enum)
+            count_stmt = count_stmt.where(Order.status == order_enum)
     if method:
-        stmt = stmt.where(Order.payment_method == PaymentMethod(method))
-        count_stmt = count_stmt.where(Order.payment_method == PaymentMethod(method))
+        norm_method = method.strip().lower()
+        if norm_method in PaymentMethod._value2member_map_:
+            stmt = stmt.where(Order.payment_method == PaymentMethod(norm_method))
+            count_stmt = count_stmt.where(Order.payment_method == PaymentMethod(norm_method))
     if pay_status:
-        stmt = stmt.where(Order.payment_status == PaymentStatus(pay_status))
-        count_stmt = count_stmt.where(Order.payment_status == PaymentStatus(pay_status))
+        norm_pay = pay_status.strip().lower()
+        if norm_pay in PaymentStatus._value2member_map_:
+            stmt = stmt.where(Order.payment_status == PaymentStatus(norm_pay))
+            count_stmt = count_stmt.where(Order.payment_status == PaymentStatus(norm_pay))
     if pincode:
         stmt = stmt.where(Order.shipping_pincode == pincode)
         count_stmt = count_stmt.where(Order.shipping_pincode == pincode)

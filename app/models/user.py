@@ -10,13 +10,14 @@ from app.core.db import Base
 class Role(str, enum.Enum):
     customer = "customer"
     admin = "admin"
+    delivery_partner = "delivery_partner"
 
 
 class User(Base):
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    role: Mapped[Role] = mapped_column(Enum(Role, native_enum=False), nullable=False)
+    role: Mapped[Role] = mapped_column(Enum(Role, native_enum=False, length=30), nullable=False)
     email: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
     full_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(15), nullable=True)
@@ -30,7 +31,7 @@ class User(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "(role = 'admin' AND username IS NOT NULL AND password_hash IS NOT NULL) OR (role = 'customer' AND email IS NOT NULL)",
+            "(role IN ('admin', 'delivery_partner') AND username IS NOT NULL AND password_hash IS NOT NULL) OR (role = 'customer' AND email IS NOT NULL)",
             name="valid_role_fields",
         ),
         Index("ix_users_email_lower", func.lower(email), unique=True),

@@ -15,7 +15,7 @@ from app.api import (
     delivery, admin_pincodes, admin_pincodes_bulk, admin_product_delivery,
     addresses, cart, checkout, admin_coupons,
     orders, admin_orders, payments, payment_methods, admin_payment_methods,
-    contact, invoices,
+    contact, invoices, admin_delivery, delivery_management,
 )
 
 settings = get_settings()
@@ -78,6 +78,9 @@ app.include_router(payment_methods.router)
 app.include_router(admin_payment_methods.router)
 app.include_router(contact.router)
 app.include_router(invoices.router)
+app.include_router(admin_delivery.router)
+app.include_router(delivery_management.auth_router)
+app.include_router(delivery_management.router)
 
 # Mount static files for product images and media
 static_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "static"))

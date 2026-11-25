@@ -5,7 +5,7 @@ from app.api.deps import get_db, get_current_user
 from app.services.otp_service import create_otp, verify_otp
 from app.services.email_service import send_otp_email
 from app.services.auth_service import get_or_create_customer, get_user_by_id
-from app.core.tokens import create_customer_token, create_refresh_token, decode_refresh_token
+from app.core.tokens import create_customer_token, create_admin_token, create_access_token, create_refresh_token, decode_refresh_token
 from app.schemas.auth import OTPRequest, OTPVerify, TokenResponse, RefreshTokenRequest
 from app.core.rate_limit import limiter
 from app.core.config import get_settings
@@ -103,7 +103,14 @@ async def refresh_token_endpoint(
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
 
-    new_access_token = create_customer_token(str(user.id))
+    if user.role == Role.customer:
+        new_access_token = create_customer_token(str(user.id))
+    elif user.role == Role.admin:
+        new_access_token = create_admin_token(str(user.id))
+    elif user.role == Role.delivery_partner:
+        new_access_token = create_access_token(str(user.id), "delivery_partner")
+    else:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Unsupported account role")
     new_refresh_token = create_refresh_token(str(user.id), user.role.value)
     return TokenResponse(
         access_token=new_access_token,

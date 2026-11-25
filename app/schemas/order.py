@@ -279,6 +279,7 @@ class OrderOut(BaseModel):
     revised_delivery_date: date | None = None
     actual_delivery_date: datetime | None = None
     delivery_status: str | None = None
+    delivery_assigned_at: datetime | None = None
     delivery_speed: str = "standard"
     delay_reason: str | None = None
     amount_paid_paise: int = 0
@@ -296,8 +297,27 @@ class OrderOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AdminOrderAssignmentSummaryOut(BaseModel):
+    id: uuid.UUID
+    partner_id: uuid.UUID
+    partner_name: str | None = None
+    partner_phone: str | None = None
+    partner_employee_id: str | None = None
+    status: str
+    version: int
+    assigned_at: datetime
+    accepted_at: datetime | None = None
+    picked_up_at: datetime | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    failure_reason: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class AdminOrderOut(OrderOut):
     history: list[AdminOrderStatusHistoryOut] = Field(default_factory=list)
+    active_assignment: AdminOrderAssignmentSummaryOut | None = None
 
 
 class PlaceOrderResponse(BaseModel):
@@ -312,6 +332,10 @@ class OrderTrackingOut(BaseModel):
     status: str
     delivery_status: str
     order_date: datetime
+    delivery_assigned_at: datetime | None = None
+    packed_at: datetime | None = None
+    shipped_at: datetime | None = None
+    out_for_delivery_at: datetime | None = None
     estimated_delivery_date: date | None = None
     estimated_delivery_end_date: date | None = None
     revised_delivery_date: date | None = None

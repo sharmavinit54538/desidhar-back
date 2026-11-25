@@ -40,7 +40,14 @@ async def require_admin(current_user: User = Depends(get_current_user)) -> User:
     return current_user
 
 
-async def require_delivery_partner(current_user: User = Depends(get_current_user)) -> User:
+async def require_delivery_partner(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
     if current_user.role != Role.delivery_partner:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Delivery partner access required")
+    from app.models.delivery_management import DeliveryPartnerProfile
+    profile = await db.get(DeliveryPartnerProfile, current_user.id)
+    if profile is None or profile.deleted_at is not None or profile.is_suspended:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Delivery partner account is suspended or inactive")
     return current_user

@@ -1,6 +1,7 @@
 import uuid
-from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field
+from datetime import date, datetime
+from typing import Literal
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.schemas.order import OrderItemOut
 
@@ -17,6 +18,36 @@ class DeliveryPartnerCreateIn(BaseModel):
     vehicle_type: str | None = Field(default=None, max_length=50)
     vehicle_registration: str | None = Field(default=None, max_length=30)
     max_active_deliveries: int = Field(default=10, ge=1, le=100)
+    availability: Literal["available", "offline"] = "offline"
+
+    @field_validator("service_pincodes", mode="before")
+    @classmethod
+    def normalize_pincodes(cls, v):
+        if v is None:
+            return []
+        return list(dict.fromkeys(str(pin).strip() for pin in v if str(pin).strip()))
+
+
+class DeliveryPartnerUpdateIn(BaseModel):
+    full_name: str | None = Field(default=None, min_length=2, max_length=100)
+    phone: str | None = Field(default=None, pattern=r"^[6-9][0-9]{9}$")
+    email: str | None = Field(default=None, max_length=255)
+    employee_id: str | None = Field(default=None, min_length=2, max_length=50)
+    service_area: str | None = Field(default=None, max_length=150)
+    service_pincodes: list[str] | None = Field(default=None, max_length=500)
+    vehicle_type: str | None = Field(default=None, max_length=50)
+    vehicle_registration: str | None = Field(default=None, max_length=30)
+    max_active_deliveries: int | None = Field(default=None, ge=1, le=100)
+    availability: Literal["available", "offline"] | None = None
+    is_active: bool | None = None
+    is_suspended: bool | None = None
+
+    @field_validator("service_pincodes", mode="before")
+    @classmethod
+    def normalize_pincodes(cls, v):
+        if v is None:
+            return None
+        return list(dict.fromkeys(str(pin).strip() for pin in v if str(pin).strip()))
 
 
 class DeliveryPartnerOut(BaseModel):
@@ -26,6 +57,8 @@ class DeliveryPartnerOut(BaseModel):
     phone: str | None
     email: str | None
     is_active: bool
+    is_suspended: bool = False
+    deleted_at: datetime | None = None
     service_area: str | None
     service_pincodes: list[str]
     vehicle_type: str | None
@@ -34,6 +67,7 @@ class DeliveryPartnerOut(BaseModel):
     availability: str
     active_assignments: int = 0
     completed_deliveries: int = 0
+    remaining_capacity: int = 0
 
 
 class DeliveryAssignmentIn(BaseModel):
@@ -43,6 +77,20 @@ class DeliveryAssignmentIn(BaseModel):
 class DeliveryActionIn(BaseModel):
     expected_version: int = Field(ge=1)
     note: str | None = Field(default=None, min_length=2, max_length=255)
+
+
+class DeliveryAssignmentHistoryOut(BaseModel):
+    id: uuid.UUID
+    assignment_id: uuid.UUID
+    order_id: uuid.UUID
+    actor_id: uuid.UUID
+    actor_name: str | None = None
+    from_status: str | None = None
+    to_status: str
+    note: str | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DeliveryAssignmentOut(BaseModel):
@@ -59,8 +107,26 @@ class DeliveryAssignmentOut(BaseModel):
     failure_reason: str | None = None
     order_number: str | None = None
     fulfillment_status: str | None = None
+    delivery_status: str | None = None
+    partner_name: str | None = None
+    partner_phone: str | None = None
+    partner_employee_id: str | None = None
+    partner_service_area: str | None = None
+    partner_availability: str | None = None
+    assigned_by_name: str | None = None
+    expected_delivery_date: date | None = None
+    estimated_delivery_end_date: date | None = None
+    shipping_pincode: str | None = None
+    shipping_name: str | None = None
+    history: list[DeliveryAssignmentHistoryOut] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class DeliveryPartnerDetailOut(DeliveryPartnerOut):
+    assigned_orders: list[DeliveryAssignmentOut] = Field(default_factory=list)
+    completed_orders: list[DeliveryAssignmentOut] = Field(default_factory=list)
+    assignment_history: list[DeliveryAssignmentHistoryOut] = Field(default_factory=list)
 
 
 class EligibleDeliveryPartnerOut(BaseModel):
@@ -70,6 +136,7 @@ class EligibleDeliveryPartnerOut(BaseModel):
     phone: str | None
     email: str | None
     is_active: bool
+    is_suspended: bool = False
     service_area: str | None
     service_pincodes: list[str]
     vehicle_type: str | None

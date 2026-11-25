@@ -8,7 +8,14 @@ from app.models.user import User
 from app.models.order import Order, OrderStatus, PaymentMethod, PaymentStatus
 from app.models.delivery_management import DeliveryAssignment
 from app.models.delivery_finance import DeliveryOTP
-from app.schemas.order import OrderOut, OrderListOut, OrderStatusUpdateIn, OrderSummaryOut, DeliveryDetailsUpdateIn
+from app.schemas.order import (
+    AdminOrderListOut,
+    AdminOrderOut,
+    DeliveryDetailsUpdateIn,
+    OrderOut,
+    OrderStatusUpdateIn,
+    OrderSummaryOut,
+)
 from app.schemas.refund import RefundCreateIn, RefundOut
 from app.services.order_service import admin_list_orders, transition_order_status
 from app.services.refund_service import create_refund, list_order_refunds
@@ -41,7 +48,7 @@ async def order_summary(db: AsyncSession = Depends(get_db), _: User = Depends(re
         pending_cod_collection=cod_count, pending_cod_amount_paise=cod_amount)
 
 
-@router.get("", response_model=OrderListOut)
+@router.get("", response_model=AdminOrderListOut)
 async def list_orders(
     status: str | None = None,
     payment_method: str | None = None,
@@ -60,18 +67,22 @@ async def list_orders(
     if payment_status and payment_status.strip().lower() not in PaymentStatus._value2member_map_:
         raise HTTPException(status_code=422, detail=f"Unsupported payment status '{payment_status}'.")
     items, total = await admin_list_orders(db, status, payment_method, payment_status, pincode, q, page, page_size)
-    return OrderListOut(items=items, total=total, page=page, page_size=page_size)
+    return AdminOrderListOut(items=items, total=total, page=page, page_size=page_size)
 
 
-@router.get("/{order_id}", response_model=OrderOut)
+@router.get("/{order_id}", response_model=AdminOrderOut)
 async def get_order_detail(order_id: uuid.UUID, db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)):
-    order = (await db.execute(select(Order).where(Order.id == order_id))).scalar_one_or_none()
+    order = (
+        await db.execute(
+            select(Order).where(Order.id == order_id).execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
     return order
 
 
-@router.post("/{order_id}/status", response_model=OrderOut)
+@router.post("/{order_id}/status", response_model=AdminOrderOut)
 async def change_status(
     order_id: uuid.UUID, data: OrderStatusUpdateIn, db: AsyncSession = Depends(get_db), admin: User = Depends(require_admin),
 ):
@@ -97,7 +108,7 @@ async def change_status(
     return order
 
 
-@router.patch("/{order_id}/delivery", response_model=OrderOut)
+@router.patch("/{order_id}/delivery", response_model=AdminOrderOut)
 async def update_delivery_details(
     order_id: uuid.UUID, data: DeliveryDetailsUpdateIn, background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db), admin: User = Depends(require_admin),
@@ -143,7 +154,7 @@ async def update_delivery_details(
     return order
 
 
-@router.post("/{order_id}/mark-paid", response_model=OrderOut)
+@router.post("/{order_id}/mark-paid", response_model=AdminOrderOut)
 async def mark_order_paid(
     order_id: uuid.UUID, db: AsyncSession = Depends(get_db), admin: User = Depends(require_admin),
 ):

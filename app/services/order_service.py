@@ -251,12 +251,21 @@ async def transition_order_status(
 
 
 async def get_user_order(session: AsyncSession, user_id: uuid.UUID, order_id: uuid.UUID) -> Order | None:
-    stmt = select(Order).where(Order.id == order_id, Order.user_id == user_id)
+    stmt = (
+        select(Order)
+        .where(Order.id == order_id, Order.user_id == user_id)
+        .execution_options(populate_existing=True)
+    )
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
 async def list_user_orders(session: AsyncSession, user_id: uuid.UUID, page: int = 1, page_size: int = 20) -> tuple[list[Order], int]:
-    stmt = select(Order).where(Order.user_id == user_id).order_by(Order.created_at.desc())
+    stmt = (
+        select(Order)
+        .where(Order.user_id == user_id)
+        .order_by(Order.created_at.desc())
+        .execution_options(populate_existing=True)
+    )
     count_stmt = select(func.count()).select_from(Order).where(Order.user_id == user_id)
     total = (await session.execute(count_stmt)).scalar() or 0
     items = list((await session.execute(stmt.offset((page - 1) * page_size).limit(page_size))).scalars().all())
@@ -296,5 +305,14 @@ async def admin_list_orders(
         count_stmt = count_stmt.where(flt)
 
     total = (await session.execute(count_stmt)).scalar() or 0
-    items = list((await session.execute(stmt.order_by(Order.created_at.desc()).offset((page - 1) * page_size).limit(page_size))).scalars().all())
+    items = list(
+        (
+            await session.execute(
+                stmt.order_by(Order.created_at.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+                .execution_options(populate_existing=True)
+            )
+        ).scalars().all()
+    )
     return items, total

@@ -113,6 +113,10 @@ async def track_order(order_id: uuid.UUID, db: AsyncSession = Depends(get_db), u
     return OrderTrackingOut(
         order_id=order.id, order_number=order.order_number, status=order.status.value,
         delivery_status=order.delivery_status, order_date=order.placed_at or order.created_at,
+        delivery_assigned_at=order.delivery_assigned_at,
+        packed_at=order.packed_at,
+        shipped_at=order.shipped_at,
+        out_for_delivery_at=order.out_for_delivery_at,
         estimated_delivery_date=order.estimated_delivery_date,
         estimated_delivery_end_date=order.estimated_delivery_end_date,
         revised_delivery_date=order.revised_delivery_date, actual_delivery_date=order.delivered_at,

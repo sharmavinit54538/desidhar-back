@@ -96,6 +96,11 @@ class Order(Base):
     customer = relationship("User", lazy="selectin")
     shipment = relationship("Shipment", lazy="selectin", uselist=False)
     invoice = relationship("Invoice", lazy="selectin", uselist=False)
+    delivery_assignments = relationship(
+        "DeliveryAssignment",
+        lazy="selectin",
+        order_by="DeliveryAssignment.assigned_at.desc()",
+    )
 
     @property
     def amount_paid_paise(self) -> int:
@@ -122,8 +127,37 @@ class Order(Base):
         return self.invoice is not None
 
     @property
+    def invoice_number(self) -> str | None:
+        return self.invoice.invoice_number if self.invoice else None
+
+    @property
+    def fulfillment_status(self) -> str:
+        return self.status.value
+
+    @property
+    def active_assignment(self):
+        for assignment in self.delivery_assignments or []:
+            if assignment.status in ("assigned", "accepted", "picked_up", "in_progress"):
+                return assignment
+        return None
+
+    @property
+    def latest_assignment(self):
+        return self.delivery_assignments[0] if self.delivery_assignments else None
+
+    @property
+    def delivery_assigned_at(self) -> datetime | None:
+        active = self.active_assignment
+        return active.assigned_at if active else None
+
+    @property
     def delivery_status(self) -> str:
-        return self.shipment.shipment_status if self.shipment else self.status.value
+        if self.shipment:
+            return self.shipment.shipment_status
+        active = self.active_assignment
+        if self.status in (OrderStatus.packed, OrderStatus.delivery_failed) and active is not None:
+            return active.status
+        return self.status.value
 
     @property
     def actual_delivery_date(self) -> datetime | None:
@@ -145,4 +179,5 @@ class Order(Base):
         Index("ix_orders_user_placed", "user_id", "placed_at"),
         Index("ix_orders_status_placed", "status", "placed_at"),
     )
+
 

@@ -70,16 +70,48 @@ async def profile(db: AsyncSession = Depends(get_db), partner: User = Depends(re
     profile = await db.get(DeliveryPartnerProfile, partner.id)
     return {"user_id": str(partner.id), "employee_id": profile.employee_id, "full_name": partner.full_name,
         "phone": partner.phone, "availability": profile.availability, "is_active": partner.is_active,
-        "service_area": profile.service_area, "max_active_deliveries": profile.max_active_deliveries}
+        "is_suspended": profile.is_suspended, "service_area": profile.service_area,
+        "service_pincodes": profile.service_pincodes, "max_active_deliveries": profile.max_active_deliveries}
 
 
 @router.patch("/availability")
 async def set_availability(availability: str, db: AsyncSession = Depends(get_db), partner: User = Depends(require_delivery_partner)):
     if availability not in ("available", "offline"):
         raise HTTPException(status_code=422, detail="Availability must be available or offline")
-    profile = await db.get(DeliveryPartnerProfile, partner.id, with_for_update=True)
+    locked_user = (await db.execute(select(User).where(User.id == partner.id).with_for_update())).scalar_one()
+    profile = (await db.execute(
+        select(DeliveryPartnerProfile).where(DeliveryPartnerProfile.user_id == partner.id).with_for_update()
+    )).scalar_one_or_none()
+    if not profile or profile.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="Delivery partner profile not found")
+    if availability == "available" and (not locked_user.is_active or profile.is_suspended):
+        raise HTTPException(status_code=409, detail="Suspended or inactive partners cannot go available")
     profile.availability = availability
+    profile.updated_at = datetime.now(timezone.utc)
+    await db.flush()
     return {"availability": profile.availability}
+
+
+@router.get("/notifications")
+async def list_partner_notifications(db: AsyncSession = Depends(get_db), partner: User = Depends(require_delivery_partner)):
+    rows = list((await db.execute(
+        select(OrderNotification)
+        .where(OrderNotification.user_id == partner.id, OrderNotification.channel == "in_app")
+        .order_by(OrderNotification.created_at.desc())
+        .limit(50)
+    )).scalars().all())
+    return [
+        {
+            "id": str(row.id),
+            "order_id": str(row.order_id),
+            "event_type": row.event_type,
+            "message": row.message,
+            "payload": row.payload,
+            "status": row.status,
+            "created_at": row.created_at,
+        }
+        for row in rows
+    ]
 
 
 @router.get("/dashboard")
@@ -174,7 +206,7 @@ async def update_assignment(order_id: uuid.UUID, data: DeliveryActionIn, partner
             raise HTTPException(status_code=409, detail=err)
         assignment.started_at = now
     elif action == "failed":
-        if order.status != OrderStatus.out_for_delivery.value:
+        if order.status != OrderStatus.out_for_delivery:
             raise HTTPException(status_code=409, detail="A delivery attempt must be in progress before reporting failure")
         ok, err = await transition_order_status(db, order, "delivery_failed", changed_by=partner.id,
             note=data.note, expected_version=order.version, actor_type="delivery_partner")
@@ -193,6 +225,7 @@ async def update_assignment(order_id: uuid.UUID, data: DeliveryActionIn, partner
         message=f"Delivery partner reported {target.replace('_', ' ')} for order {order.order_number}",
         payload={"assignment_id": str(assignment.id), "order_id": str(order.id), "status": target}, status="queued"))
     await db.flush()
+    await db.refresh(assignment)
     assignment.order_number = order.order_number
     assignment.fulfillment_status = order.status.value
     return assignment

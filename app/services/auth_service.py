@@ -56,7 +56,11 @@ async def authenticate_delivery_partner(session: AsyncSession, username: str, pa
         verify_password(password, dummy_hash())
         return None
     from app.core.clock import utc_now
+    from app.models.delivery_management import DeliveryPartnerProfile
     if not user.is_active or (user.locked_until and user.locked_until > utc_now()):
+        return None
+    profile = await session.get(DeliveryPartnerProfile, user.id)
+    if profile is None or profile.deleted_at is not None or profile.is_suspended:
         return None
     if not verify_password(password, user.password_hash):
         user.failed_logins += 1

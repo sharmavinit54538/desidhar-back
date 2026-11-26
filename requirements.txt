@@ -1,6 +1,8 @@
 fastapi
 uvicorn[standard]
-sqlalchemy
+sqlalchemy[asyncio]
+asyncpg
+greenlet
 psycopg2-binary
 pydantic
 pydantic-settings
@@ -10,6 +12,9 @@ alembic
 python-multipart
 email-validator
 pydantic-extra-types
+slowapi
+razorpay
+tzdata
 pytest
 pytest-asyncio
 httpx

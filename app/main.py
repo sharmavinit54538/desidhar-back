@@ -89,6 +89,17 @@ os.makedirs(os.path.join(static_dir, "products"), exist_ok=True)
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
+@app.middleware("http")
+async def add_static_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/static/products/"):
+        if request.url.path.endswith(".webp"):
+            response.headers.setdefault("Cache-Control", "public, max-age=2592000, stale-while-revalidate=86400")
+        else:
+            response.headers.setdefault("Cache-Control", "public, max-age=604800, stale-while-revalidate=86400")
+    return response
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}

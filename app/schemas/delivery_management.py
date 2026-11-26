@@ -79,6 +79,16 @@ class DeliveryActionIn(BaseModel):
     note: str | None = Field(default=None, min_length=2, max_length=255)
 
 
+class DeliveryCompleteIn(BaseModel):
+    expected_order_version: int = Field(ge=1)
+    expected_assignment_version: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+    otp: str = Field(pattern=r"^\d{6}$")
+    cash_collected: bool = False
+    collected_amount_paise: int | None = Field(default=None, gt=0)
+    note: str | None = Field(default=None, max_length=255)
+
+
 class DeliveryAssignmentHistoryOut(BaseModel):
     id: uuid.UUID
     assignment_id: uuid.UUID
@@ -169,6 +179,11 @@ class DeliveryOrderOut(BaseModel):
     amount_paid_paise: int
     outstanding_amount_paise: int
     version: int
+    delivery_status: str | None = None
+    estimated_delivery_date: date | None = None
+    estimated_delivery_end_date: date | None = None
+    revised_delivery_date: date | None = None
+    actual_delivery_date: datetime | None = None
     created_at: datetime
     items: list[OrderItemOut]
     assignment: DeliveryAssignmentOut

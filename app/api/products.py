@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db
 from app.schemas.product import ProductOut, ProductListOut
@@ -30,8 +31,9 @@ async def get_products(
 
 @router.get("/{slug}", response_model=ProductOut)
 async def get_product(slug: str, db: AsyncSession = Depends(get_db)):
+    if slug.lower() == "amul-butter":
+        return RedirectResponse(url="butter", status_code=status.HTTP_308_PERMANENT_REDIRECT)
     product = await get_product_by_slug(db, slug, active_only=True)
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
     return product
-

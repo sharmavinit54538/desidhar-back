@@ -1,8 +1,9 @@
 """Seed and synchronize authentic product images for all catalog products in PostgreSQL."""
 import asyncio
-import sys
+import argparse
 from sqlalchemy import delete, select
 from app.core.db import async_session_maker
+from app.core.product_image_metadata import PURE_DESI_GHEE_IMAGES
 from app.models.product import Product
 from app.models.product_image import ProductImage
 from app.models.category import Category
@@ -21,12 +22,7 @@ PRODUCT_IMAGE_MAP = {
         {"url": "/static/products/cow-milk/cow-milk-02-classic-glass-1200.webp", "sort_order": 1},
         {"url": "/static/products/cow-milk/cow-milk-03-rim-closeup-1200.webp", "sort_order": 2},
     ],
-    "Pure Desi Ghee": [
-        {"url": "/static/products/pure-desi-ghee/pure-desi-ghee-01-primary-white-1200.webp", "sort_order": 0},
-        {"url": "/static/products/pure-desi-ghee/pure-desi-ghee-02-spoon-drip-1200.webp", "sort_order": 1},
-        {"url": "/static/products/pure-desi-ghee/pure-desi-ghee-03-closeup-texture-1200.webp", "sort_order": 2},
-        {"url": "/static/products/pure-desi-ghee/pure-desi-ghee-04-traditional-bilona-1200.webp", "sort_order": 3},
-    ],
+    "Pure Desi Ghee": list(PURE_DESI_GHEE_IMAGES),
     "Butter": [
         {"url": "/static/products/butter/butter-01-primary-white-1200.webp", "sort_order": 0},
         {"url": "/static/products/butter/butter-02-lifestyle-1200.webp", "sort_order": 1},
@@ -80,16 +76,21 @@ PRODUCT_IMAGE_MAP = {
 
 CATEGORY_DEFAULT_IMAGE = {
     "Milk": "/static/products/full-cream-milk/full-cream-milk-01-carafe-pour-1200.webp",
-    "Ghee and Butter": "/static/products/pure-desi-ghee/pure-desi-ghee-01-primary-white-1200.webp",
+    "Ghee and Butter": "/static/products/pure-desi-ghee/pure-desi-ghee-01.webp",
     "Paneer and Cream": "/static/products/fresh-paneer/fresh-paneer-01-plate-cubes-1200.webp",
     "Sweets": "/static/products/gulab-jamun/gulab-jamun-01-primary-white-1200.webp",
 }
 
 
-async def seed_product_images(*, force_sync: bool = False) -> None:
+async def seed_product_images(*, force_sync: bool = False, slug: str | None = None) -> None:
     async with async_session_maker() as session:
-        result = await session.execute(select(Product).order_by(Product.name))
+        statement = select(Product).order_by(Product.name)
+        if slug is not None:
+            statement = statement.where(Product.slug == slug)
+        result = await session.execute(statement)
         products = result.scalars().all()
+        if slug is not None and not products:
+            raise ValueError(f"Product slug '{slug}' was not found")
 
         seeded_count = 0
         for product in products:
@@ -98,7 +99,11 @@ async def seed_product_images(*, force_sync: bool = False) -> None:
                 print(f"Product '{product.name}' already has {len(existing_imgs)} images, skipping.")
                 continue
 
-            target_images = PRODUCT_IMAGE_MAP.get(product.name)
+            target_images = (
+                list(PURE_DESI_GHEE_IMAGES)
+                if product.slug == "pure-desi-ghee"
+                else PRODUCT_IMAGE_MAP.get(product.name)
+            )
             if not target_images:
                 if existing_imgs:
                     continue
@@ -130,5 +135,8 @@ async def seed_product_images(*, force_sync: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    sync_flag = "--sync" in sys.argv[1:]
-    asyncio.run(seed_product_images(force_sync=sync_flag))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--sync", action="store_true", help="Replace existing image references")
+    parser.add_argument("--slug", help="Limit image synchronization to this exact product slug")
+    arguments = parser.parse_args()
+    asyncio.run(seed_product_images(force_sync=arguments.sync, slug=arguments.slug))

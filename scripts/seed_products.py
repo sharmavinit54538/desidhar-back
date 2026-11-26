@@ -3,6 +3,7 @@ import asyncio
 from decimal import Decimal
 from sqlalchemy import select
 from app.core.db import async_session_maker
+from app.core.product_image_metadata import PURE_DESI_GHEE_IMAGES
 from app.models.category import Category
 from app.models.product import Product, UnitEnum
 from app.models.product_image import ProductImage
@@ -15,10 +16,7 @@ PRODUCT_IMAGE_MAP = {
     ],
     "Toned Milk": [{"url": "/static/products/product-milk.jpg", "sort_order": 0}],
     "Cow Milk": [{"url": "/static/products/product-milk.jpg", "sort_order": 0}],
-    "Pure Desi Ghee": [
-        {"url": "/static/products/product-ghee.jpg", "sort_order": 0},
-        {"url": "/static/products/story-churning.jpg", "sort_order": 1},
-    ],
+    "Pure Desi Ghee": list(PURE_DESI_GHEE_IMAGES),
     "Butter": [
         {"url": "/static/products/butter/butter-01-primary-white-1200.webp", "sort_order": 0},
         {"url": "/static/products/butter/butter-02-lifestyle-1200.webp", "sort_order": 1},

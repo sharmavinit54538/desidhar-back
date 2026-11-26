@@ -28,8 +28,17 @@ def test_all_mapped_webp_variants_exist_in_backend_and_frontend() -> None:
             assert entry["sort_order"] == idx
             url = entry["url"]
             assert "amul" not in url.lower()
-            assert url.startswith("/static/products/") and (url.endswith("-1200.webp") or url.endswith("-1600.webp"))
+            assert url.startswith("/static/products/") and url.endswith(".webp")
             rel = url.removeprefix("/static/products/")
+            if name == "Pure Desi Ghee":
+                assert url.endswith(f"pure-desi-ghee-{idx + 1:02d}.webp")
+                variants = [rel, *(rel.replace(".webp", f"-{size}.webp") for size in (320, 640, 1200))]
+                for variant_rel in variants:
+                    be_file = BACKEND_STATIC / variant_rel
+                    fe_file = FRONTEND_STATIC / variant_rel
+                    assert be_file.is_file() and be_file.stat().st_size > 1000, f"Missing backend asset: {be_file}"
+                    assert fe_file.is_file() and fe_file.read_bytes() == be_file.read_bytes(), f"Frontend static mismatch: {fe_file}"
+                continue
             base_tag = "-1600.webp" if url.endswith("-1600.webp") else "-1200.webp"
             expected_sizes = ("320", "640", "1600", "2048") if base_tag == "-1600.webp" else ("320", "640", "1200", "2048")
             for size in expected_sizes:
@@ -40,6 +49,26 @@ def test_all_mapped_webp_variants_exist_in_backend_and_frontend() -> None:
                 assert fe_file.is_file() and fe_file.stat().st_size == be_file.stat().st_size, (
                     f"Frontend static mismatch: {fe_file}"
                 )
+
+
+def test_pure_desi_ghee_gallery_and_static_responses() -> None:
+    entries = PRODUCT_IMAGE_MAP["Pure Desi Ghee"]
+    assert len(entries) == 10
+    with TestClient(app) as client:
+        response = client.get("/products/pure-desi-ghee")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["slug"] == "pure-desi-ghee"
+        assert [image["url"] for image in data["images"]] == [image["url"] for image in entries]
+        assert [image["sort_order"] for image in data["images"]] == list(range(10))
+        assert [image["alt"] for image in data["images"]] == [image["alt"] for image in entries]
+        assert data["images"][7]["alt"].startswith("Serving suggestion:")
+        for image in data["images"]:
+            asset = client.get(image["url"])
+            assert asset.status_code == 200
+            assert "image/webp" in asset.headers["content-type"]
+            assert 150 * 1024 <= len(asset.content) <= 300 * 1024
+            assert "max-age=2592000" in asset.headers["cache-control"]
 
 
 def test_white_butter_makhan_gallery_quality_and_dimensions() -> None:

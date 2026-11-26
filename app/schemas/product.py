@@ -14,6 +14,7 @@ class ImageOut(BaseModel):
     id: uuid.UUID
     url: str
     sort_order: int
+    alt: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
